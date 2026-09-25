@@ -1,0 +1,16 @@
+# 统一按 LF 检出
+# Windows 上 git 默认 core.autocrlf=true，会在检出时把 LF 换成 CRLF，
+# 与 .editorconfig 的 end_of_line = lf 冲突，也让跨平台比对出现无意义的整文件差异。
+* text=auto eol=lf
+
+# 二进制文件不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.xlsx binary
+*.dll binary
+*.pdb binary
+*.so binary
+*.pfx binary
