@@ -1,0 +1,39 @@
+# 构建产物
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio / Rider 的本机设置
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# 测试与覆盖率产物
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+
+# 编辑器临时文件
+*.swp
+*~
+*.tmp
+*.bak
+
+# 模拟器运行时产物：报文与状态机日志（--log-file 的落盘位置）
+PlcSimulator/logs/

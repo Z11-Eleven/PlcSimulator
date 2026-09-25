@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/PlcSimulator.Core.Tests/PlcSimulator.Core.Tests.csproj" />
+    <Project Path="tests/PlcSimulator.Devices.Tests/PlcSimulator.Devices.Tests.csproj" />
+    <Project Path="tests/PlcSimulator.Import.Tests/PlcSimulator.Import.Tests.csproj" />
+    <Project Path="tests/PlcSimulator.Integration.Tests/PlcSimulator.Integration.Tests.csproj" />
+    <Project Path="tests/PlcSimulator.Protocol.Modbus.Tests/PlcSimulator.Protocol.Modbus.Tests.csproj" />
+  </Folder>
+  <Project Path="PlcSimulator.App/PlcSimulator.App.csproj" />
+  <Project Path="PlcSimulator.Cli/PlcSimulator.Cli.csproj" />
+  <Project Path="PlcSimulator.Core/PlcSimulator.Core.csproj" />
+  <Project Path="PlcSimulator.Devices/PlcSimulator.Devices.csproj" />
+  <Project Path="PlcSimulator.Hosting/PlcSimulator.Hosting.csproj" />
+  <Project Path="PlcSimulator.Import/PlcSimulator.Import.csproj" />
+  <Project Path="PlcSimulator.Protocol.Modbus/PlcSimulator.Protocol.Modbus.csproj" />
+</Solution>

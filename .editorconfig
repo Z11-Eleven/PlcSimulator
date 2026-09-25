@@ -1,0 +1,114 @@
+# 潜江太蓝 PLC 模拟器 —— 编辑器与代码风格规则
+#
+# Visual Studio / VS Code / Rider 都会读取本文件；规则贴合本工程现有代码的写法，
+# 照它写不会冒出波浪线，写偏了会在 IDE 里提示。带 :warning 的会标出，
+# :suggestion 只做提示，:silent 不提示但格式化时按此处理。
+# 本文件**不影响编译结果**（构建期分析由各 csproj 的 <AnalysisLevel> 控制）。
+
+root = true
+
+# ---------- 通用 ----------
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{json,jsonc,xml,csproj,props,targets,slnx,vsconfig}]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# ---------- C# ----------
+[*.{cs,csx}]
+
+# 命名空间与 using：file-scoped 命名空间、using 放文件顶部、System 在前
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_using_directive_placement = outside_namespace:silent
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+dotnet_diagnostic.IDE0005.severity = suggestion
+
+# 大括号：Allman（左括号独占一行），成员初始化器同样换行
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_prefer_braces = when_multiline:suggestion
+
+# 不写 this.
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# 类型与修饰符
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+dotnet_style_predefined_type_for_member_access = true:suggestion
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+dotnet_style_readonly_field = true:suggestion
+
+# var：倾向于「类型显而易见时用 var」，但工程里两种写法都有，因此不提示（silent），
+# 只在 IDE 的快速操作里给建议。
+csharp_style_var_for_built_in_types = false:silent
+csharp_style_var_when_type_is_apparent = true:silent
+csharp_style_var_elsewhere = false:silent
+
+# 表达式体：属性/访问器/单行方法用，构造函数与运算符不用
+csharp_style_expression_bodied_methods = when_on_single_line:silent
+csharp_style_expression_bodied_constructors = false:silent
+csharp_style_expression_bodied_operators = false:silent
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_indexers = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_expression_bodied_lambdas = true:suggestion
+csharp_style_expression_bodied_local_functions = when_on_single_line:silent
+
+# 现代化写法（工程里大量使用，保持一条线）
+csharp_style_prefer_pattern_matching = true:suggestion
+csharp_style_prefer_not_pattern = true:suggestion
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_prefer_extended_property_pattern = true:suggestion
+csharp_style_implicit_object_creation_when_type_is_apparent = true:suggestion
+csharp_style_prefer_index_operator = true:suggestion
+csharp_style_prefer_range_operator = true:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_style_prefer_primary_constructors = true:silent
+csharp_style_prefer_method_group_conversion = true:silent
+dotnet_style_coalesce_expression = true:suggestion
+dotnet_style_null_propagation = true:suggestion
+
+# 集合表达式（[.. items]）与 using 声明
+dotnet_style_prefer_collection_expression = when_types_exactly_match:suggestion
+csharp_style_prefer_collection_expression = true:suggestion
+csharp_style_prefer_using_declaration = true:suggestion
+
+# 关于字段命名：工程约定是「私有实例字段 _camelCase、static/const 字段 PascalCase」，
+# 但 editorconfig 的命名规则无法表达「只匹配实例字段」——required_modifiers 留空会连
+# static/const 字段一起匹配，写成 static 又不会优先于前者。因此这里不作字段命名检查
+# （VS 官方模板同样只约束 non_field_members），约定靠人工保持。
+
+# ---------- 按需抑制的分析规则 ----------
+# CA1865：这里需要带 StringComparison 的重载，char 版本没有该参数
+dotnet_diagnostic.CA1865.severity = none
+
+# ---------- 测试项目 ----------
+# 测试方法沿用 Method_Condition_Result 命名，不套用常规 PascalCase 规则
+[tests/**/*.cs]
+dotnet_naming_rule.test_methods.severity = none
+dotnet_naming_rule.test_methods.symbols = test_methods
+dotnet_naming_rule.test_methods.style = pascal_case
+
+dotnet_naming_symbols.test_methods.applicable_kinds = method
+
+dotnet_naming_style.pascal_case.capitalization = pascal_case
