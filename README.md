@@ -83,7 +83,7 @@ dotnet run --project PlcSimulator.Cli -- check config/simulator.production.json
 
 **修复（2026-09-25）**：重新导出的数据（`expdata_202609251702.csv`）已把重复的站台号拆开，
 并让同一台提升机各层的前 4 位一致（`10021`/`10022`、`10531`/`10532`、`10581`/`10582`）。
-`config/simulator.production.json` 与 `config/simulator.qj_tl.json` 已用新数据重新生成，
+`config/simulator.production.json` 已用新数据重新生成，
 修订后 `1001 → 1017` 恢复为 5 跳、`1056 → 1017` 恢复通行。
 
 > 这次修订同时说明了两条数据要求：**`stationNo` 不能重复**、**同一台提升机各层的站台号前 4 位必须一致**。
