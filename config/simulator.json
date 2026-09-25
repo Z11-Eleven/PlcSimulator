@@ -1,0 +1,231 @@
+{
+  // 潜江太蓝 PLC 模拟器配置 —— 第一期：输送线（NTI + Modbus）
+  // 数据来源：数据库 qj_tl.wcs_opcitem 中 stationno = 1004 / 1005 / 1006 三行。
+  // 注意：原始导出里三行的 value 都是 0，会导致三个站台共用同一段寄存器。
+  // 本样例按「每站递增 30 字节」构造，待现场核对真实值后覆盖。
+  "version": 1,
+
+  "server": {
+    // 同机测试用 127.0.0.1；若要模拟多台设备再用 127.0.0.2 / 127.0.0.3 …
+    // 跨机部署改成 "0.0.0.0" 即可——**但只限测试网段**：
+    // Modbus 本身没有认证，模拟器也没有访问控制，0.0.0.0 等于把一个谁都能写的数据区
+    // 摆到局域网上，切勿接进产线网。
+    "listen": [
+      { "ip": "127.0.0.1", "port": 502, "enabled": true }
+    ],
+    "defaultSlaveId": 1,
+    // WCS 的闭源 DLL 可能把站台号当作单元标识发出来，单设备端点需要容忍站号不匹配。
+    "acceptAnySlaveId": true,
+    "maxConnectionsPerIp": 8,
+    "recordRawFrames": true
+  },
+
+  "byteOrder": {
+    "policies": {
+      // 输送线读：整数全部大端，只有条码区间 [12,28) 需要还原字序
+      // （对应 ConveryPLC.cs:419 那次条码专属的交换）。
+      "NTI-ConveyorRead": {
+        "wordByteOrder": "BigEndian",
+        "swapFromByteOffset": null,
+        "extraPairUnswapRanges": [[12, 28]]
+      },
+      // 输送线整块写（"NTI-ConveyorWrite"）那套策略已经删掉：寄存器数据区里存的就是线路字节，
+      // 模拟器不做整块写方向的反变换，留着这个旋钮会让人以为改了它有用。
+      // 单字段写：WCS 直接按大端写 2 字节，完全不交换
+      // （对应 ConveryPLC.cs:1003-1007）。
+      // 心跳清零就走这条路径，所以解析写请求时必须用本策略。
+      "SingleFieldWrite": {
+        "wordByteOrder": "BigEndian",
+        "swapFromByteOffset": null
+      }
+    }
+  },
+
+  // 故障注入。总开关默认关闭，正常联调时保持 false。
+  // 每条规则都可单独 enabled；也可以在调试台的「故障注入」页运行时勾选。
+  // 建议同时设置 maxTimes，避免忘记关闭导致长时间不可用。
+  "faultInjection": {
+    "enabled": false,
+    "rules": [
+      {
+        "name": "读不响应（验证 WCS 降速重连）",
+        "enabled": false,
+        "effect": "SilentDrop",
+        "match": { "functionCodes": [3, 4] }
+      },
+      {
+        "name": "延时 3 秒",
+        "enabled": false,
+        "effect": "DelayThenPass",
+        "delayMs": 3000,
+        "match": {}
+      },
+      {
+        "name": "非法地址",
+        "enabled": false,
+        "effect": "ExceptionResponse",
+        "exceptionCode": 2,
+        "match": { "functionCodes": [3] }
+      },
+      {
+        "name": "从站忙",
+        "enabled": false,
+        "effect": "ExceptionResponse",
+        "exceptionCode": 6,
+        "match": { "functionCodes": [16] }
+      },
+      {
+        "name": "立即断开连接",
+        "enabled": false,
+        "effect": "CloseConnection",
+        "match": {}
+      },
+      {
+        "name": "1004 心跳停止",
+        "enabled": false,
+        "effect": "HeartbeatStop",
+        "stationNo": "1004"
+      }
+    ]
+  },
+
+  "devices": [
+    {
+      "id": "CV-1-127001",
+      "name": "1线输送机",
+      "enabled": true,
+      "ip": "127.0.0.1",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "Modbus",
+      "protocolTypeRaw": "NTI_Modbus",
+      "deviceType": "Conveyor",
+      "protocolType": "NTI",
+      "readByteOrderPolicy": "NTI-ConveyorRead",
+      "singleFieldWriteByteOrderPolicy": "SingleFieldWrite",
+      "pollHintMs": 1000,
+      "belong": "1",
+
+      // 三个站台同属一个组（同 IP、同 DBAddress、同 belong、同 Group），
+      // WCS 会把它们合并成一次批量读。
+      // 块大小临时放宽到 2048 字节（= 1024 个寄存器），用于排除「写越界」问题。
+      // WCS 的写地址 = 数据库 value ÷ 2 + 字段字节偏移 ÷ 2；
+      // 只要落在块内就不会再返回异常码 0x02。
+      // 确认 0x02 消失后，再把下面每个站台的 byteOffset 对齐到数据库 value 的真实值，
+      // 否则地址虽然能写进去，状态机也读不到（它会按站台的 byteOffset 去取任务号）。
+      "blocks": [
+        { "group": "", "baseByteOffset": 0, "lengthBytes": 2048 }
+      ],
+
+      "stations": [
+        {
+          "stationNo": "1004",
+          "name": "1004",
+          "group": "",
+          "byteOffset": 0,
+          "lengthBytes": 30,
+          "stationType": 0,
+          "locationX": 28,
+          "locationY": 21,
+          "width": 1,
+          "height": 1,
+          "simulation": {
+            "initial": {
+              "taskNum": 0,
+              "goodsType": 0,
+              "fromStation": 0,
+              "toStation": 0,
+              "barcode": "",
+              "heartbeat": 0,
+              "loaded": false,
+              "auto": true,
+              "fault": false
+            },
+            "actionDelayMs": 3000,
+            "jitterMs": 200,
+            "clearTimeoutMs": 10000,
+            "heartbeat": {
+              "setValue": 1,
+              "clearOnValue": 2,
+              "mode": "Once"
+            },
+            "autoTask": {
+              "enabled": false,
+              "taskNum": 1001,
+              "goodsType": 1,
+              "from": "1004",
+              "to": "1005",
+              "barcode": "PLT20260921001"
+            }
+          }
+        },
+        {
+          "stationNo": "1005",
+          "name": "1005",
+          "group": "",
+          "byteOffset": 30,
+          "lengthBytes": 30,
+          "stationType": 0,
+          "locationX": 28,
+          "locationY": 20,
+          "width": 1,
+          "height": 1,
+          "simulation": {
+            "initial": {
+              "taskNum": 0,
+              "goodsType": 0,
+              "fromStation": 0,
+              "toStation": 0,
+              "barcode": "",
+              "heartbeat": 0,
+              "loaded": false,
+              "auto": true,
+              "fault": false
+            },
+            "actionDelayMs": 3000,
+            "jitterMs": 200,
+            "clearTimeoutMs": 10000,
+            "heartbeat": {
+              "setValue": 1,
+              "clearOnValue": 2,
+              "mode": "Once"
+            }
+          }
+        },
+        {
+          "stationNo": "1006",
+          "name": "1006",
+          "group": "",
+          "byteOffset": 60,
+          "lengthBytes": 30,
+          "stationType": 0,
+          "locationX": 28,
+          "locationY": 19,
+          "width": 1,
+          "height": 1,
+          "simulation": {
+            "initial": {
+              "taskNum": 0,
+              "goodsType": 0,
+              "fromStation": 0,
+              "toStation": 0,
+              "barcode": "",
+              "heartbeat": 0,
+              "loaded": false,
+              "auto": true,
+              "fault": false
+            },
+            "actionDelayMs": 3000,
+            "jitterMs": 200,
+            "clearTimeoutMs": 10000,
+            "heartbeat": {
+              "setValue": 1,
+              "clearOnValue": 2,
+              "mode": "Once"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
