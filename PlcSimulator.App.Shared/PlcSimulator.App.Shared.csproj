@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    调试台的共用零件：报文日志视图、双缓冲表格、会话（SimulatorSession）、子窗口基类。
+    宪章：只放与设备类型无关的东西——判据是文件里是否出现
+    DeviceRuntime / StationRuntime / SrmMachine / ConveyorStationMachine，出现即出局，
+    那属于 PlcSimulator.App.Conveyor 或 PlcSimulator.App.Srm。
+    注意 ProjectReference 是传递的，编译器拦不住越界，这条靠评审。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\PlcSimulator.Core\PlcSimulator.Core.csproj" />
+    <ProjectReference Include="..\PlcSimulator.Hosting\PlcSimulator.Hosting.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

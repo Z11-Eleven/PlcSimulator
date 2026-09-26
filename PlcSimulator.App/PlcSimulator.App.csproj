@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\PlcSimulator.App.Shared\PlcSimulator.App.Shared.csproj" />
     <ProjectReference Include="..\PlcSimulator.Core\PlcSimulator.Core.csproj" />
     <ProjectReference Include="..\PlcSimulator.Devices\PlcSimulator.Devices.csproj" />
     <ProjectReference Include="..\PlcSimulator.Hosting\PlcSimulator.Hosting.csproj" />

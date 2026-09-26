@@ -1,4 +1,4 @@
-using PlcSimulator.App.Controls;
+using PlcSimulator.App.Shared;
 using PlcSimulator.Devices;
 using PlcSimulator.Devices.Stations;
 using PlcSimulator.Hosting;

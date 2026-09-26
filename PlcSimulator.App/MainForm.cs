@@ -1,3 +1,4 @@
+using PlcSimulator.App.Shared;
 using PlcSimulator.App.Views;
 using PlcSimulator.Core.Configuration;
 using PlcSimulator.Core.Frames;

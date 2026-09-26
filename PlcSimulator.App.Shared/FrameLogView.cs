@@ -2,13 +2,13 @@ using System.Text;
 using PlcSimulator.Core;
 using PlcSimulator.Core.Frames;
 
-namespace PlcSimulator.App.Views;
+namespace PlcSimulator.App.Shared;
 
 /// <summary>
 /// 报文日志。数据来自环形缓冲的**增量拉取**（<see cref="RingBufferFrameLog.TakeSince"/>），
 /// 因此 100ms 轮询下每秒几百条也不会拖慢 UI；显示用虚拟列表，只渲染可见行。
 /// </summary>
-internal sealed class FrameLogView : UserControl
+public sealed class FrameLogView : UserControl
 {
     private const int MaxRendered = 20_000;
 

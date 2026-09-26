@@ -1,4 +1,4 @@
-using PlcSimulator.App.Controls;
+using PlcSimulator.App.Shared;
 using PlcSimulator.Core.Faults;
 
 namespace PlcSimulator.App.Views;
