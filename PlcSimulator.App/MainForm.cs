@@ -26,7 +26,6 @@ internal sealed class MainForm : Form
     private const int UiRefreshMs = 300;
 
     private readonly AppSettings _settings = AppSettings.Load();
-    private readonly RingBufferFrameLog _frameLog = new();
     private readonly System.Windows.Forms.Timer _uiTimer = new();
 
     private readonly ToolStrip _toolStrip = new();
@@ -54,8 +53,8 @@ internal sealed class MainForm : Form
     private readonly ToolStripStatusLabel _engineLabel = new("引擎未启动");
     private readonly ToolStripStatusLabel _configLabel = new();
 
-    private readonly List<LoadedConfiguration> _configs = [];
-    private LoadedConfiguration? _current;
+    private readonly List<SimulatorSession> _configs = [];
+    private SimulatorSession? _current;
     private long _frameVersion;
     private bool _busy;
 
@@ -85,7 +84,7 @@ internal sealed class MainForm : Form
         {
             e.Cancel = true;
 
-            foreach (LoadedConfiguration config in _configs)
+            foreach (SimulatorSession config in _configs)
             {
                 await config.Host.DisposeAsync();
             }
@@ -219,7 +218,7 @@ internal sealed class MainForm : Form
     /// 读盘、校验、建 host 并挂上。失败时弹框说明并返回 false，
     /// **不影响已经挂着的其它配置**——这是「加载一份就顶掉另一份」的老毛病的解药。
     /// </summary>
-    private bool TryOpenConfiguration(string configPath, out LoadedConfiguration? opened)
+    private bool TryOpenConfiguration(string configPath, out SimulatorSession? opened)
     {
         opened = null;
 
@@ -229,73 +228,48 @@ internal sealed class MainForm : Form
             return false;
         }
 
-        ConfigLoadResult result;
-
-        try
+        if (!SessionFactory.TryLoad(configPath, out SimulatorSession session, out string failure))
         {
-            result = ConfigLoader.LoadFromFile(configPath);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                this,
-                $"加载配置失败：\n{ex.Message}\n\n路径：{Path.GetFullPath(configPath)}",
-                "配置错误",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            MessageBox.Show(this, failure, "配置错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             SetStatus("配置加载失败");
             return false;
         }
 
-        if (!result.IsValid)
+        // 引擎／协议线程的日志由会话接住（这样窗口后开也不会错过开局那几条），
+        // 这里只负责封送回 UI 线程显示，并带上来源文件名——多份配置共用一个状态栏。
+        session.Logged += (_, message) => PostStatus($"[{session.DisplayName}] {message}");
+
+        _configs.Add(session);
+        opened = session;
+
+        if (session.Result.Warnings.Count > 0)
         {
-            MessageBox.Show(
-                this,
-                $"配置校验未通过（{configPath}）：\n\n"
-                + string.Join("\n", result.Errors.Select(static e => "· " + e)),
-                "配置错误",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-            SetStatus("配置校验未通过");
-            return false;
-        }
-
-        var config = new LoadedConfiguration(configPath, result, _frameLog);
-
-        // Log 是引擎线程／协议线程调的，直接写控件属跨线程操作。
-        // 封送回 UI 线程再显示；窗口还没句柄、或正在销毁时丢掉这条日志。
-        // 多份配置共用一个状态栏，所以带上来源文件名，免得分不清是哪份在说话。
-        string label = Path.GetFileName(configPath);
-        config.Host.Log = message =>
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke(() => _statusLabel.Text = $"[{label}] {message}");
-                }
-            }
-            catch (InvalidOperationException)
-            {
-                // 窗口正在销毁，丢一条状态日志无妨。
-            }
-        };
-
-        _configs.Add(config);
-        opened = config;
-
-        if (result.Warnings.Count > 0)
-        {
-            SetStatus($"配置警告：{result.Warnings[0]}");
+            SetStatus($"配置警告：{session.Result.Warnings[0]}");
         }
 
         return true;
     }
 
+    /// <summary>把后台线程来的状态消息封送回 UI 线程。</summary>
+    private void PostStatus(string message)
+    {
+        try
+        {
+            if (IsHandleCreated && !IsDisposed)
+            {
+                BeginInvoke(() => _statusLabel.Text = message);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // 窗口正在销毁，丢一条状态日志无妨。
+        }
+    }
+
     /// <summary>加载一份配置；同路径已经挂着就先替换掉它。返回是否成功。</summary>
     private async Task<bool> LoadOrReplaceAsync(string configPath)
     {
-        LoadedConfiguration? existing = _configs.Find(
+        SimulatorSession? existing = _configs.Find(
             c => string.Equals(c.Path, configPath, StringComparison.OrdinalIgnoreCase));
 
         bool restart = existing?.IsRunning ?? false;
@@ -305,7 +279,7 @@ internal sealed class MainForm : Form
             await CloseConfigurationAsync(existing);
         }
 
-        if (!TryOpenConfiguration(configPath, out LoadedConfiguration? opened) || opened is null)
+        if (!TryOpenConfiguration(configPath, out SimulatorSession? opened) || opened is null)
         {
             RefreshTree();
             return false;
@@ -325,7 +299,7 @@ internal sealed class MainForm : Form
         return true;
     }
 
-    private async Task CloseConfigurationAsync(LoadedConfiguration config)
+    private async Task CloseConfigurationAsync(SimulatorSession config)
     {
         await config.Host.DisposeAsync();
 
@@ -338,20 +312,24 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>把右侧各页签重新绑到选中的这份配置上。</summary>
-    private void SelectConfiguration(LoadedConfiguration config)
+    private void SelectConfiguration(SimulatorSession session)
     {
-        _current = config;
+        _current = session;
 
-        _pointView.Bind(config.Host);
+        // 换了配置就换了报文流水，游标与显示都要跟着重来。
+        _frameView.Clear();
+        _frameVersion = 0;
+
+        _pointView.Bind(session.Host);
         _pointView.Reset();
-        _stateView.Bind(config.Host);
-        _srmView.Bind(config.Host);
-        _pathView.Bind(config.Host);
-        _faultView.Bind(config.Host.FaultInjector);
+        _stateView.Bind(session.Host);
+        _srmView.Bind(session.Host);
+        _pathView.Bind(session.Host);
+        _faultView.Bind(session.Host.FaultInjector);
 
-        _configLabel.Text = Path.GetFullPath(config.Path);
+        _configLabel.Text = Path.GetFullPath(session.Path);
 
-        SelectDefaultTabFor(config);
+        SelectDefaultTabFor(session);
         UpdateRunState();
     }
 
@@ -359,10 +337,10 @@ internal sealed class MainForm : Form
     /// 切到这份配置有内容的那一页。纯堆垛机的配置里「点位监视」（站台字段表）是空白的，
     /// 停在那一页会让人以为没加载成功。
     /// </summary>
-    private void SelectDefaultTabFor(LoadedConfiguration config)
+    private void SelectDefaultTabFor(SimulatorSession session)
     {
-        bool hasStations = config.Host.Devices.Count > 0;
-        bool hasSrm = config.Host.SrmDevices.Count > 0;
+        bool hasStations = session.Host.Devices.Count > 0;
+        bool hasSrm = session.Host.SrmDevices.Count > 0;
 
         string? target = (hasStations, hasSrm) switch
         {
@@ -410,7 +388,7 @@ internal sealed class MainForm : Form
         _tree.BeginUpdate();
         _tree.Nodes.Clear();
 
-        foreach (LoadedConfiguration config in _configs)
+        foreach (SimulatorSession config in _configs)
         {
             var configNode = new TreeNode(config.DisplayNameWithState)
             {
@@ -460,7 +438,7 @@ internal sealed class MainForm : Form
     {
         foreach (TreeNode node in _tree.Nodes)
         {
-            if (node.Tag is not LoadedConfiguration config)
+            if (node.Tag is not SimulatorSession config)
             {
                 continue;
             }
@@ -488,7 +466,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        LoadedConfiguration config = _current;
+        SimulatorSession config = _current;
         _busy = true;
 
         try
@@ -532,7 +510,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            foreach (LoadedConfiguration config in _configs.Where(static c => !c.IsRunning).ToList())
+            foreach (SimulatorSession config in _configs.Where(static c => !c.IsRunning).ToList())
             {
                 try
                 {
@@ -565,7 +543,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            foreach (LoadedConfiguration config in _configs.Where(static c => c.IsRunning).ToList())
+            foreach (SimulatorSession config in _configs.Where(static c => c.IsRunning).ToList())
             {
                 await config.Host.StopAsync();
             }
@@ -614,7 +592,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        LoadedConfiguration closing = _current;
+        SimulatorSession closing = _current;
         _busy = true;
 
         try
@@ -688,8 +666,8 @@ internal sealed class MainForm : Form
     private void OnTreeSelect(object? sender, TreeViewEventArgs e)
     {
         // 选中设备/站台节点时也切到它所属的那份配置。
-        LoadedConfiguration? config = e.Node?.Tag as LoadedConfiguration
-            ?? e.Node?.Parent?.Tag as LoadedConfiguration;
+        SimulatorSession? config = e.Node?.Tag as SimulatorSession
+            ?? e.Node?.Parent?.Tag as SimulatorSession;
 
         if (config is not null && !ReferenceEquals(config, _current))
         {
@@ -701,21 +679,21 @@ internal sealed class MainForm : Form
     {
         try
         {
-            // 报文日志是全局的：所有配置的帧都进同一条流水，不随选中项切换。
-            FrameLogEntry[] batch = _frameLog.TakeSince(_frameVersion, maxItems: 2000, out long nextVersion);
-            _frameVersion = nextVersion;
-
-            if (batch.Length > 0)
-            {
-                _frameView.Append(batch);
-                _frameCounterLabel.Text = $"报文 {_frameLog.TotalWritten}";
-            }
-
             UpdateTreeRunState();
 
             if (_current is null)
             {
                 return;
+            }
+
+            // 报文日志来自当前这份配置自己的环形缓冲——每份配置一条流水，互不掺和。
+            FrameLogEntry[] batch = _current.FrameLog.TakeSince(_frameVersion, maxItems: 2000, out long nextVersion);
+            _frameVersion = nextVersion;
+
+            if (batch.Length > 0)
+            {
+                _frameView.Append(batch);
+                _frameCounterLabel.Text = $"报文 {_current.LogRevision}";
             }
 
             _pointView.RefreshDirty();
