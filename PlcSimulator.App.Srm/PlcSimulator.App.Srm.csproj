@@ -1,21 +1,21 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    堆垛机的子窗口与专属视图。只装堆垛机的东西——输送机相关的视图一律不在这里。
+    与 PlcSimulator.App.Conveyor 永不互引，这是「两类业务隔开」的硬边界。
+  -->
   <ItemGroup>
     <ProjectReference Include="..\PlcSimulator.App.Shared\PlcSimulator.App.Shared.csproj" />
-    <ProjectReference Include="..\PlcSimulator.App.Srm\PlcSimulator.App.Srm.csproj" />
     <ProjectReference Include="..\PlcSimulator.Core\PlcSimulator.Core.csproj" />
     <ProjectReference Include="..\PlcSimulator.Devices\PlcSimulator.Devices.csproj" />
     <ProjectReference Include="..\PlcSimulator.Hosting\PlcSimulator.Hosting.csproj" />
-    <!-- 「配置生成」页与命令行导入工具共用 CsvTable / ConfigBuilder，避免两套解析 -->
-    <ProjectReference Include="..\PlcSimulator.Import\PlcSimulator.Import.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
 </Project>

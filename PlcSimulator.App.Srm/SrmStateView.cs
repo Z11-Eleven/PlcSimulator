@@ -4,13 +4,13 @@ using PlcSimulator.Devices;
 using PlcSimulator.Devices.Srm;
 using PlcSimulator.Hosting;
 
-namespace PlcSimulator.App.Views;
+namespace PlcSimulator.App.Srm;
 
 /// <summary>
 /// 堆垛机面板：每台一行，显示作业状态、工作模式、当前位置与两个货叉，
 /// 并提供打手动 / 置火警 / 复位按钮。
 /// </summary>
-internal sealed class SrmStateView : UserControl
+public sealed class SrmStateView : UserControl
 {
     private const int ColumnDevice = 0;
     private const int ColumnReport = 1;

@@ -8,6 +8,7 @@
   </Folder>
   <Project Path="PlcSimulator.App/PlcSimulator.App.csproj" />
   <Project Path="PlcSimulator.App.Shared/PlcSimulator.App.Shared.csproj" />
+  <Project Path="PlcSimulator.App.Srm/PlcSimulator.App.Srm.csproj" />
   <Project Path="PlcSimulator.Cli/PlcSimulator.Cli.csproj" />
   <Project Path="PlcSimulator.Core/PlcSimulator.Core.csproj" />
   <Project Path="PlcSimulator.Devices/PlcSimulator.Devices.csproj" />

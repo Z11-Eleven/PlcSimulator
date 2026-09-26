@@ -1,4 +1,5 @@
 using PlcSimulator.App.Shared;
+using PlcSimulator.App.Srm;
 using PlcSimulator.App.Views;
 using PlcSimulator.Core.Configuration;
 using PlcSimulator.Core.Frames;
@@ -43,7 +44,6 @@ internal sealed class MainForm : Form
     private readonly PointMonitorView _pointView = new();
     private readonly FrameLogView _frameView = new();
     private readonly StationStateView _stateView = new();
-    private readonly SrmStateView _srmView = new();
     private readonly PathDiagnosticView _pathView = new();
     private readonly FaultInjectionView _faultView = new();
     private readonly ConfigImportView _importView = new();
@@ -54,7 +54,14 @@ internal sealed class MainForm : Form
     private readonly ToolStripStatusLabel _configLabel = new();
 
     private readonly List<SimulatorSession> _configs = [];
+
+    /// <summary>已经开出来的子窗口，按配置路径索引（不区分大小写，与判重口径一致）。</summary>
+    private readonly Dictionary<string, SimulatorWindowBase> _windows = new(StringComparer.OrdinalIgnoreCase);
+
     private SimulatorSession? _current;
+
+    /// <summary>启动时要呈现的第一份配置。窗口显示之后才处理，见 <see cref="OnShown"/>。</summary>
+    private SimulatorSession? _pendingPresent;
     private long _frameVersion;
     private bool _busy;
 
@@ -74,6 +81,21 @@ internal sealed class MainForm : Form
         _uiTimer.Interval = UiRefreshMs;
         _uiTimer.Tick += OnUiTick;
         _uiTimer.Start();
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+
+        if (_pendingPresent is null)
+        {
+            return;
+        }
+
+        SimulatorSession session = _pendingPresent;
+        _pendingPresent = null;
+
+        PresentConfiguration(session);
     }
 
     protected override async void OnFormClosing(FormClosingEventArgs e)
@@ -138,7 +160,6 @@ internal sealed class MainForm : Form
         _tabs.Dock = DockStyle.Fill;
         _tabs.TabPages.Add(CreateTab("点位监视", _pointView));
         _tabs.TabPages.Add(CreateTab("流程状态机", _stateView));
-        _tabs.TabPages.Add(CreateTab("堆垛机", _srmView));
         _tabs.TabPages.Add(CreateTab("路径诊断", _pathView));
         _tabs.TabPages.Add(CreateTab("故障注入", _faultView));
         _tabs.TabPages.Add(CreateTab("报文日志", _frameView));
@@ -201,9 +222,11 @@ internal sealed class MainForm : Form
 
         RefreshTree();
 
+        // 呈现在 OnShown 里做：构造函数期间主窗口还没有句柄，子窗口以它为 owner 时
+        // 定位与显示都还没有可依据的坐标，会落到看不见的地方。
         if (_configs.Count > 0)
         {
-            SelectConfiguration(_configs[0]);
+            _pendingPresent = _configs[0];
         }
 
         SetStatus(_configs.Count switch
@@ -286,7 +309,7 @@ internal sealed class MainForm : Form
         }
 
         RefreshTree();
-        SelectConfiguration(opened);
+        PresentConfiguration(opened);
         SaveOpenConfigs();
 
         if (restart)
@@ -311,6 +334,65 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// 呈现一份配置：纯堆垛机的开独立子窗口，其余暂仍走主窗口里的页签。
+    /// （下一步把输送机也搬进自己的窗口后，这段分支就只剩一种去向。）
+    /// </summary>
+    private void PresentConfiguration(SimulatorSession session)
+    {
+        if (session.Composition == DeviceComposition.SrmOnly)
+        {
+            OpenSessionWindow(session);
+            return;
+        }
+
+        SelectConfiguration(session);
+    }
+
+    /// <summary>
+    /// 开一个会话窗口。同一份配置只开一个：已开着就激活它；正在关就拒绝——
+    /// 那个时间窗里会话还没摘掉，再开一个会有两个宿主抢同一批端口。
+    /// </summary>
+    private void OpenSessionWindow(SimulatorSession session)
+    {
+        if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? existing))
+        {
+            if (existing.ClosingInProgress)
+            {
+                SetStatus("这份配置的窗口正在关闭，请稍后再试");
+                return;
+            }
+
+            if (existing.WindowState == FormWindowState.Minimized)
+            {
+                existing.WindowState = FormWindowState.Normal;
+            }
+
+            existing.Activate();
+            SetStatus($"这份配置已经打开了，已切到它的窗口：{session.DisplayName}");
+            return;
+        }
+
+        var window = new SrmSimulatorForm(session);
+        window.FormClosed += (_, _) => OnSessionWindowClosed(session);
+
+        _windows[session.Path] = window;
+        window.Show(this);
+
+        SetStatus($"已打开：{session.DisplayName}");
+    }
+
+    private void OnSessionWindowClosed(SimulatorSession session)
+    {
+        _windows.Remove(session.Path);
+
+        // 窗口关了，这份配置就不该再占着记录——它已经不监听端口了。
+        _configs.Remove(session);
+        SaveOpenConfigs();
+
+        SetStatus($"已关闭：{session.DisplayName}");
+    }
+
     /// <summary>把右侧各页签重新绑到选中的这份配置上。</summary>
     private void SelectConfiguration(SimulatorSession session)
     {
@@ -323,7 +405,6 @@ internal sealed class MainForm : Form
         _pointView.Bind(session.Host);
         _pointView.Reset();
         _stateView.Bind(session.Host);
-        _srmView.Bind(session.Host);
         _pathView.Bind(session.Host);
         _faultView.Bind(session.Host.FaultInjector);
 
@@ -603,7 +684,7 @@ internal sealed class MainForm : Form
             if (_configs.Count > 0)
             {
                 RefreshTree();
-                SelectConfiguration(_configs[0]);
+                PresentConfiguration(_configs[0]);
                 SetStatus($"已关闭：{closing.DisplayName}");
             }
             else
@@ -671,7 +752,7 @@ internal sealed class MainForm : Form
 
         if (config is not null && !ReferenceEquals(config, _current))
         {
-            SelectConfiguration(config);
+            PresentConfiguration(config);
         }
     }
 
@@ -698,7 +779,6 @@ internal sealed class MainForm : Form
 
             _pointView.RefreshDirty();
             _stateView.Update(_current.Host.Engine.Snapshots());
-            _srmView.UpdateMachines();
             _faultView.RefreshHits();
         }
         catch (Exception ex)
