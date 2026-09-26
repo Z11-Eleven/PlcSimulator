@@ -267,12 +267,9 @@ internal sealed class MainForm : Form
     {
         _windows.Remove(session.Path);
 
-        // 窗口关了，这份配置就不该再占着记录——它已经不监听端口了。
-        _configs.Remove(session);
-        SaveOpenConfigs();
-        RebuildOverview();
-
-        SetStatus($"已关闭：{session.DisplayName}");
+        // 关窗口只是把界面收起来，**不卸载配置**——它还留在总览里，双击就能重新开。
+        // 真想卸载用工具栏的「关闭配置」。
+        SetStatus($"已关闭窗口：{session.DisplayName}（配置仍在列表里，双击可重新打开）");
     }
 
     // ---- 总览 ----
@@ -402,6 +399,10 @@ internal sealed class MainForm : Form
         {
             Title = "选择模拟器配置（可多份并存）",
             Filter = "配置文件 (*.json)|*.json|所有文件 (*.*)|*.*",
+            // 必须用旧式对话框：Vista 风格的 IFileDialog.Show 在本机会卡住不返回，
+            // 现象是点「打开配置…」后进程直接无响应、对话框也不出现（dotnet-stack
+            // 抓到主线程停在 IFileDialog.Show 里）。旧式对话框实测正常。
+            AutoUpgradeEnabled = false,
         };
 
         string startFrom = _configs.FirstOrDefault()?.Path
@@ -431,9 +432,18 @@ internal sealed class MainForm : Form
         OpenSessionWindow(added);
     }
 
-    private void OnCloseConfigClick(object? sender, EventArgs e)
+    /// <summary>
+    /// 卸载一份配置：关掉它的窗口、停掉服务、从总览里移除。
+    /// 与「关窗口」不同——关窗口只是收起界面，配置还留着。
+    /// </summary>
+    private async void OnCloseConfigClick(object? sender, EventArgs e)
     {
-        if (_busy || _overview.SelectedItems.Count == 0)
+        if (_busy)
+        {
+            return;
+        }
+
+        if (_overview.SelectedItems.Count == 0)
         {
             SetStatus("先在列表里选中一份配置");
             return;
@@ -444,26 +454,29 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // 窗口开着就关窗口（它会停服务并走 OnSessionWindowClosed 收尾）；
-        // 没开窗口的（比如启动时只加载没呈现）直接摘掉。
-        if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? window))
+        _busy = true;
+
+        try
         {
-            window.Close();
-            return;
+            // 窗口开着就先关窗口（它会停服务）；没开窗口的直接停。
+            if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? window))
+            {
+                window.Close();
+            }
+
+            await session.DisposeAsync().ConfigureAwait(true);
+
+            _windows.Remove(session.Path);
+            _configs.Remove(session);
+            SaveOpenConfigs();
+            RebuildOverview();
+
+            SetStatus($"已卸载：{session.DisplayName}");
         }
-
-        _ = CloseWithoutWindowAsync(session);
-    }
-
-    private async Task CloseWithoutWindowAsync(SimulatorSession session)
-    {
-        await session.DisposeAsync().ConfigureAwait(true);
-
-        _configs.Remove(session);
-        SaveOpenConfigs();
-        RebuildOverview();
-
-        SetStatus($"已关闭：{session.DisplayName}");
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private void OnGenerateConfigClick(object? sender, EventArgs e)
