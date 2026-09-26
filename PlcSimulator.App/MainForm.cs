@@ -2,6 +2,7 @@ using PlcSimulator.App.Views;
 using PlcSimulator.Core.Configuration;
 using PlcSimulator.Core.Frames;
 using PlcSimulator.Devices;
+using PlcSimulator.Devices.Srm;
 using PlcSimulator.Devices.Stations;
 using PlcSimulator.Hosting;
 
@@ -34,6 +35,7 @@ internal sealed class MainForm : Form
     private readonly PointMonitorView _pointView = new();
     private readonly FrameLogView _frameView = new();
     private readonly StationStateView _stateView = new();
+    private readonly SrmStateView _srmView = new();
     private readonly PathDiagnosticView _pathView = new();
     private readonly FaultInjectionView _faultView = new();
     private readonly ConfigImportView _importView = new();
@@ -132,6 +134,7 @@ internal sealed class MainForm : Form
         _tabs.TabPages.Add(CreateTab("点位监视", _pointView));
         _tabs.TabPages.Add(CreateTab("报文日志", _frameView));
         _tabs.TabPages.Add(CreateTab("流程状态机", _stateView));
+        _tabs.TabPages.Add(CreateTab("堆垛机", _srmView));
         _tabs.TabPages.Add(CreateTab("路径诊断", _pathView));
         _tabs.TabPages.Add(CreateTab("故障注入", _faultView));
         _tabs.TabPages.Add(CreateTab("配置生成", _importView));
@@ -241,6 +244,7 @@ internal sealed class MainForm : Form
         _pointView.Bind(_host);
         _pointView.Reset();
         _stateView.Bind(_host);
+        _srmView.Bind(_host);
         _pathView.Bind(_host);
         _faultView.Bind(_host.FaultInjector);
         _frameView.Clear();
@@ -269,6 +273,16 @@ internal sealed class MainForm : Form
             }
 
             _tree.Nodes.Add(deviceNode);
+        }
+
+        // 堆垛机不是站台模型，单独挂一个节点，让它在设备树里也看得见。
+        foreach (SrmDeviceRuntime device in host.SrmDevices)
+        {
+            _tree.Nodes.Add(new TreeNode(
+                $"{device.DeviceId}  ({device.Config.Ip} 指令{device.Ports.Command})")
+            {
+                Tag = device,
+            });
         }
 
         _tree.ExpandAll();
@@ -440,6 +454,7 @@ internal sealed class MainForm : Form
 
             IReadOnlyList<StationSnapshot> snapshots = _host.Engine.Snapshots();
             _stateView.Update(snapshots);
+            _srmView.UpdateMachines();
             _faultView.RefreshHits();
         }
         catch (Exception ex)
