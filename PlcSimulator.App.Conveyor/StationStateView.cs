@@ -3,13 +3,13 @@ using PlcSimulator.Devices;
 using PlcSimulator.Devices.Stations;
 using PlcSimulator.Hosting;
 
-namespace PlcSimulator.App.Views;
+namespace PlcSimulator.App.Conveyor;
 
 /// <summary>
 /// 流程状态机面板：每个站台一行，显示它当前卡在哪一步，并提供手动注入按钮。
 /// 站台数量级不大，用普通模式按需更新单元格即可。
 /// </summary>
-internal sealed class StationStateView : UserControl
+public sealed class StationStateView : UserControl
 {
     private const int ColumnDevice = 0;
     private const int ColumnStation = 1;

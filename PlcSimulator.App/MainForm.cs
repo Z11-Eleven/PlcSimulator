@@ -1,68 +1,47 @@
+using PlcSimulator.App.Conveyor;
 using PlcSimulator.App.Shared;
 using PlcSimulator.App.Srm;
-using PlcSimulator.App.Views;
-using PlcSimulator.Core.Configuration;
-using PlcSimulator.Core.Frames;
-using PlcSimulator.Devices;
-using PlcSimulator.Devices.Srm;
-using PlcSimulator.Devices.Stations;
-using PlcSimulator.Hosting;
 
 namespace PlcSimulator.App;
 
 /// <summary>
-/// 调试台主窗体。按工程约束不使用窗体设计器，所有控件在代码里创建。
+/// 调试台主窗口——**只做会话总览**：列出已加载的配置与运行状态，双击开或切到它的窗口。
 /// <para>
-/// 可以**同时挂多份配置**：每份各有一个 <see cref="SimulatorHost"/>，各自监听自己的端口，
-/// 互不覆盖（输送线走 Modbus 502，堆垛机走另外三个端口）。左侧树按配置分组，
-/// 右侧页签的内容跟随当前选中的配置；「报文日志」与「配置生成」是全局的，不随选中项切换。
-/// </para>
-/// <para>
-/// 后台线程（协议层、状态机引擎）从不触碰控件：它们只写数据区与环形缓冲，
-/// UI 通过 300ms 定时器主动拉取，并只刷新发生变化的部分。
+/// 设备明细不在这一层：输送线的站台在「输送机模拟器」窗口的点位监视表里，
+/// 堆垛机在「堆垛机模拟器」窗口的面板里。两类功能各自成窗，互不参杂。
 /// </para>
 /// </summary>
 internal sealed class MainForm : Form
 {
     private const int UiRefreshMs = 300;
 
+    private const int ColumnConfig = 0;
+    private const int ColumnComposition = 1;
+    private const int ColumnState = 2;
+    private const int ColumnFrames = 3;
+    private const int ColumnPath = 4;
+
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly System.Windows.Forms.Timer _uiTimer = new();
 
     private readonly ToolStrip _toolStrip = new();
-    private readonly ToolStripButton _startStopButton = new("启动");
-    private readonly ToolStripButton _startAllButton = new("全部启动");
-    private readonly ToolStripButton _stopAllButton = new("全部停止");
     private readonly ToolStripButton _openConfigButton = new("打开配置…");
     private readonly ToolStripButton _closeConfigButton = new("关闭配置");
-    private readonly ToolStripButton _reloadButton = new("重新加载");
-    private readonly ToolStripButton _resetButton = new("复位");
+    private readonly ToolStripButton _startAllButton = new("全部启动");
+    private readonly ToolStripButton _stopAllButton = new("全部停止");
     private readonly ToolStripLabel _statusLabel = new("未加载配置");
 
-    private readonly TreeView _tree = new();
-    private readonly TabControl _tabs = new();
-    private readonly PointMonitorView _pointView = new();
-    private readonly FrameLogView _frameView = new();
-    private readonly StationStateView _stateView = new();
-    private readonly PathDiagnosticView _pathView = new();
-    private readonly FaultInjectionView _faultView = new();
-    private readonly ConfigImportView _importView = new();
+    private readonly ListView _overview = new();
 
     private readonly StatusStrip _statusStrip = new();
-    private readonly ToolStripStatusLabel _frameCounterLabel = new("报文 0");
-    private readonly ToolStripStatusLabel _engineLabel = new("引擎未启动");
-    private readonly ToolStripStatusLabel _configLabel = new();
+    private readonly ToolStripStatusLabel _summaryLabel = new();
 
     private readonly List<SimulatorSession> _configs = [];
 
     /// <summary>已经开出来的子窗口，按配置路径索引（不区分大小写，与判重口径一致）。</summary>
     private readonly Dictionary<string, SimulatorWindowBase> _windows = new(StringComparer.OrdinalIgnoreCase);
 
-    private SimulatorSession? _current;
-
-    /// <summary>启动时要呈现的第一份配置。窗口显示之后才处理，见 <see cref="OnShown"/>。</summary>
     private SimulatorSession? _pendingPresent;
-    private long _frameVersion;
     private bool _busy;
 
     /// <summary>
@@ -71,15 +50,15 @@ internal sealed class MainForm : Form
     public MainForm(string? configPath)
     {
         Text = "潜江太蓝 PLC 模拟器";
-        MinimumSize = new Size(1100, 700);
-        Size = new Size(1440, 880);
+        MinimumSize = new Size(900, 500);
+        Size = new Size(1180, 620);
         StartPosition = FormStartPosition.CenterScreen;
 
         BuildLayout();
         LoadInitialConfigurations(configPath);
 
         _uiTimer.Interval = UiRefreshMs;
-        _uiTimer.Tick += OnUiTick;
+        _uiTimer.Tick += (_, _) => RefreshOverview();
         _uiTimer.Start();
     }
 
@@ -95,7 +74,9 @@ internal sealed class MainForm : Form
         SimulatorSession session = _pendingPresent;
         _pendingPresent = null;
 
-        PresentConfiguration(session);
+        // 呈现在这里而不是构造函数里：那时本窗口还没有句柄与位置，
+        // 子窗口以它为 owner 时定位与显示都没有可依据的坐标。
+        OpenSessionWindow(session);
     }
 
     protected override async void OnFormClosing(FormClosingEventArgs e)
@@ -106,13 +87,21 @@ internal sealed class MainForm : Form
         {
             e.Cancel = true;
 
-            foreach (SimulatorSession config in _configs)
+            // 先显式关掉各个子窗口（它们会把自己的会话停干净），再关自己。
+            // 不依赖「owner 关闭时连带关闭 owned form」与 e.Cancel 的隐晦交互。
+            foreach (SimulatorWindowBase window in _windows.Values.ToList())
             {
-                await config.Host.DisposeAsync();
+                window.Close();
+            }
+
+            _windows.Clear();
+
+            foreach (SimulatorSession session in _configs)
+            {
+                await session.DisposeAsync().ConfigureAwait(true);
             }
 
             _configs.Clear();
-            _current = null;
 
             // 这一次关闭已经被取消掉了，停完服务得再关一次——否则窗口留着，用户要按两次 X。
             Close();
@@ -125,77 +114,42 @@ internal sealed class MainForm : Form
     private void BuildLayout()
     {
         _toolStrip.GripStyle = ToolStripGripStyle.Hidden;
-        _toolStrip.Items.Add(_startStopButton);
         _toolStrip.Items.Add(_startAllButton);
         _toolStrip.Items.Add(_stopAllButton);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_openConfigButton);
         _toolStrip.Items.Add(_closeConfigButton);
-        _toolStrip.Items.Add(_reloadButton);
-        _toolStrip.Items.Add(new ToolStripSeparator());
-        _toolStrip.Items.Add(_resetButton);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_statusLabel);
 
-        _startStopButton.Click += OnStartStopClick;
         _startAllButton.Click += OnStartAllClick;
         _stopAllButton.Click += OnStopAllClick;
         _openConfigButton.Click += OnOpenConfigClick;
         _closeConfigButton.Click += OnCloseConfigClick;
-        _reloadButton.Click += OnReloadClick;
-        _resetButton.Click += (_, _) => _current?.Host.ResetAll();
 
-        // 「配置生成」页的上次选择只在启动时回填一次，之后由用户自己改，
-        // 免得每次重新加载配置都把用户刚填的路径冲掉。
-        _importView.PrefillPaths(
-            _settings.LastCsvPath ?? string.Empty,
-            _settings.LastOutputPath ?? Path.Combine("config", "simulator.generated.json"));
-        _importView.ConfigGenerated += OnConfigGenerated;
+        _overview.Dock = DockStyle.Fill;
+        _overview.View = View.Details;
+        _overview.FullRowSelect = true;
+        _overview.MultiSelect = false;
+        _overview.HideSelection = false;
+        _overview.GridLines = true;
 
-        _tree.Dock = DockStyle.Fill;
-        _tree.HideSelection = false;
-        _tree.ShowNodeToolTips = true;
-        _tree.AfterSelect += OnTreeSelect;
+        _overview.Columns.Add("配置", 220);
+        _overview.Columns.Add("构成", 200);
+        _overview.Columns.Add("状态", 90);
+        _overview.Columns.Add("报文", 80);
+        _overview.Columns.Add("路径", 560);
 
-        _tabs.Dock = DockStyle.Fill;
-        _tabs.TabPages.Add(CreateTab("点位监视", _pointView));
-        _tabs.TabPages.Add(CreateTab("流程状态机", _stateView));
-        _tabs.TabPages.Add(CreateTab("路径诊断", _pathView));
-        _tabs.TabPages.Add(CreateTab("故障注入", _faultView));
-        _tabs.TabPages.Add(CreateTab("报文日志", _frameView));
-        _tabs.TabPages.Add(CreateTab("配置生成", _importView));
+        _overview.DoubleClick += OnOverviewDoubleClick;
 
-        var split = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            SplitterDistance = 300,
-            FixedPanel = FixedPanel.Panel1,
-        };
-        split.Panel1.Controls.Add(_tree);
-        split.Panel2.Controls.Add(_tabs);
+        _statusStrip.Items.Add(_summaryLabel);
 
-        var splitPanel = new Panel { Dock = DockStyle.Fill };
-        splitPanel.Controls.Add(split);
-
-        _statusStrip.Items.Add(_frameCounterLabel);
-        _statusStrip.Items.Add(new ToolStripStatusLabel { Spring = false, Text = "  |  " });
-        _statusStrip.Items.Add(_engineLabel);
-        _statusStrip.Items.Add(new ToolStripStatusLabel { Spring = true, Text = string.Empty });
-        _statusStrip.Items.Add(_configLabel);
-
-        Controls.Add(splitPanel);
+        Controls.Add(_overview);
         Controls.Add(_toolStrip);
         Controls.Add(_statusStrip);
     }
 
-    private static TabPage CreateTab(string title, Control content)
-    {
-        var page = new TabPage(title) { Padding = new Padding(2) };
-        page.Controls.Add(content);
-        return page;
-    }
-
-    // ---- 加载与切换 ----
+    // ---- 加载与呈现 ----
 
     private void LoadInitialConfigurations(string? commandLinePath)
     {
@@ -212,18 +166,14 @@ internal sealed class MainForm : Form
 
         foreach (string path in paths)
         {
-            if (TryOpenConfiguration(path, out _))
+            if (!TryAddConfiguration(path, out _))
             {
-                continue;
+                failures++;
             }
-
-            failures++;
         }
 
-        RefreshTree();
+        RebuildOverview();
 
-        // 呈现在 OnShown 里做：构造函数期间主窗口还没有句柄，子窗口以它为 owner 时
-        // 定位与显示都还没有可依据的坐标，会落到看不见的地方。
         if (_configs.Count > 0)
         {
             _pendingPresent = _configs[0];
@@ -233,17 +183,17 @@ internal sealed class MainForm : Form
         {
             0 => "没有加载任何配置，请用「打开配置…」选一份",
             _ when failures > 0 => $"已加载 {_configs.Count} 份配置，另有 {failures} 份没加载成功",
-            _ => $"已加载 {_configs.Count} 份配置",
+            _ => $"已加载 {_configs.Count} 份配置，双击一行打开它的模拟器窗口",
         });
     }
 
     /// <summary>
-    /// 读盘、校验、建 host 并挂上。失败时弹框说明并返回 false，
-    /// **不影响已经挂着的其它配置**——这是「加载一份就顶掉另一份」的老毛病的解药。
+    /// 读盘、校验、建会话并挂上。失败时弹框说明并返回 false，
+    /// **不影响已经挂着的其它配置**。
     /// </summary>
-    private bool TryOpenConfiguration(string configPath, out SimulatorSession? opened)
+    private bool TryAddConfiguration(string configPath, out SimulatorSession? added)
     {
-        opened = null;
+        added = null;
 
         if (_configs.Exists(c => string.Equals(c.Path, configPath, StringComparison.OrdinalIgnoreCase)))
         {
@@ -258,107 +208,23 @@ internal sealed class MainForm : Form
             return false;
         }
 
-        // 引擎／协议线程的日志由会话接住（这样窗口后开也不会错过开局那几条），
-        // 这里只负责封送回 UI 线程显示，并带上来源文件名——多份配置共用一个状态栏。
+        // 会话接住宿主日志（这样窗口后开也不会错过 Build 阶段那几条），
+        // 这里只把「这份配置出事了」这类消息显示到主窗口状态栏。
         session.Logged += (_, message) => PostStatus($"[{session.DisplayName}] {message}");
 
         _configs.Add(session);
-        opened = session;
-
-        if (session.Result.Warnings.Count > 0)
-        {
-            SetStatus($"配置警告：{session.Result.Warnings[0]}");
-        }
+        added = session;
 
         return true;
     }
 
-    /// <summary>把后台线程来的状态消息封送回 UI 线程。</summary>
-    private void PostStatus(string message)
-    {
-        try
-        {
-            if (IsHandleCreated && !IsDisposed)
-            {
-                BeginInvoke(() => _statusLabel.Text = message);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            // 窗口正在销毁，丢一条状态日志无妨。
-        }
-    }
-
-    /// <summary>加载一份配置；同路径已经挂着就先替换掉它。返回是否成功。</summary>
-    private async Task<bool> LoadOrReplaceAsync(string configPath)
-    {
-        SimulatorSession? existing = _configs.Find(
-            c => string.Equals(c.Path, configPath, StringComparison.OrdinalIgnoreCase));
-
-        bool restart = existing?.IsRunning ?? false;
-
-        if (existing is not null)
-        {
-            await CloseConfigurationAsync(existing);
-        }
-
-        if (!TryOpenConfiguration(configPath, out SimulatorSession? opened) || opened is null)
-        {
-            RefreshTree();
-            return false;
-        }
-
-        RefreshTree();
-        PresentConfiguration(opened);
-        SaveOpenConfigs();
-
-        if (restart)
-        {
-            await opened.Host.StartAsync();
-            UpdateRunState();
-        }
-
-        SetStatus($"已加载：{opened.DisplayName}（当前 {_configs.Count} 份配置）");
-        return true;
-    }
-
-    private async Task CloseConfigurationAsync(SimulatorSession config)
-    {
-        await config.Host.DisposeAsync();
-
-        _configs.Remove(config);
-
-        if (ReferenceEquals(_current, config))
-        {
-            _current = null;
-        }
-    }
-
-    /// <summary>
-    /// 呈现一份配置：纯堆垛机的开独立子窗口，其余暂仍走主窗口里的页签。
-    /// （下一步把输送机也搬进自己的窗口后，这段分支就只剩一种去向。）
-    /// </summary>
-    private void PresentConfiguration(SimulatorSession session)
-    {
-        if (session.Composition == DeviceComposition.SrmOnly)
-        {
-            OpenSessionWindow(session);
-            return;
-        }
-
-        SelectConfiguration(session);
-    }
-
-    /// <summary>
-    /// 开一个会话窗口。同一份配置只开一个：已开着就激活它；正在关就拒绝——
-    /// 那个时间窗里会话还没摘掉，再开一个会有两个宿主抢同一批端口。
-    /// </summary>
     private void OpenSessionWindow(SimulatorSession session)
     {
         if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? existing))
         {
             if (existing.ClosingInProgress)
             {
+                // 那个时间窗里会话还没摘掉，再开一个会有两个宿主抢同一批端口。
                 SetStatus("这份配置的窗口正在关闭，请稍后再试");
                 return;
             }
@@ -369,17 +235,22 @@ internal sealed class MainForm : Form
             }
 
             existing.Activate();
-            SetStatus($"这份配置已经打开了，已切到它的窗口：{session.DisplayName}");
+            SetStatus($"已切到：{session.DisplayName}");
             return;
         }
 
-        var window = new SrmSimulatorForm(session);
+        // 纯堆垛机开堆垛机窗口，其余（输送线、空配置）开输送机窗口——
+        // 空配置时那个窗口会带一条横幅说明。
+        SimulatorWindowBase window = session.Composition == DeviceComposition.SrmOnly
+            ? new SrmSimulatorForm(session)
+            : new ConveyorSimulatorForm(session);
+
         window.FormClosed += (_, _) => OnSessionWindowClosed(session);
 
         _windows[session.Path] = window;
         window.Show(this);
 
-        SetStatus($"已打开：{session.DisplayName}");
+        SetStatus($"已打开：{session.DisplayName}（{session.DeviceSummary}）");
     }
 
     private void OnSessionWindowClosed(SimulatorSession session)
@@ -389,200 +260,80 @@ internal sealed class MainForm : Form
         // 窗口关了，这份配置就不该再占着记录——它已经不监听端口了。
         _configs.Remove(session);
         SaveOpenConfigs();
+        RebuildOverview();
 
         SetStatus($"已关闭：{session.DisplayName}");
     }
 
-    /// <summary>把右侧各页签重新绑到选中的这份配置上。</summary>
-    private void SelectConfiguration(SimulatorSession session)
+    // ---- 总览 ----
+
+    private void RebuildOverview()
     {
-        _current = session;
+        _overview.BeginUpdate();
+        _overview.Items.Clear();
 
-        // 换了配置就换了报文流水，游标与显示都要跟着重来。
-        _frameView.Clear();
-        _frameVersion = 0;
-
-        _pointView.Bind(session.Host);
-        _pointView.Reset();
-        _stateView.Bind(session.Host);
-        _pathView.Bind(session.Host);
-        _faultView.Bind(session.Host.FaultInjector);
-
-        _configLabel.Text = Path.GetFullPath(session.Path);
-
-        SelectDefaultTabFor(session);
-        UpdateRunState();
-    }
-
-    /// <summary>
-    /// 切到这份配置有内容的那一页。纯堆垛机的配置里「点位监视」（站台字段表）是空白的，
-    /// 停在那一页会让人以为没加载成功。
-    /// </summary>
-    private void SelectDefaultTabFor(SimulatorSession session)
-    {
-        bool hasStations = session.Host.Devices.Count > 0;
-        bool hasSrm = session.Host.SrmDevices.Count > 0;
-
-        string? target = (hasStations, hasSrm) switch
+        foreach (SimulatorSession session in _configs)
         {
-            (false, true) => "堆垛机",
-            (true, _) => "点位监视",
-            _ => null,
-        };
+            var item = new ListViewItem(session.DisplayName) { Tag = session };
+            item.SubItems.Add(session.DeviceSummary);
+            item.SubItems.Add(session.IsRunning ? "运行中" : "已停止");
+            item.SubItems.Add(session.LogRevision.ToString());
+            item.SubItems.Add(Path.GetFullPath(session.Path));
 
-        if (target is null)
-        {
-            return;
+            _overview.Items.Add(item);
         }
 
-        foreach (TabPage page in _tabs.TabPages)
-        {
-            if (string.Equals(page.Text, target, StringComparison.Ordinal))
-            {
-                _tabs.SelectedTab = page;
-                return;
-            }
-        }
+        _overview.EndUpdate();
+        RefreshOverview();
     }
 
-    private void UpdateRunState()
+    /// <summary>只更新会变的两列，不重建——重建会丢选中项。</summary>
+    private void RefreshOverview()
     {
-        bool hasCurrent = _current is not null;
-        bool running = _current?.IsRunning ?? false;
-
-        _startStopButton.Text = running ? "停止" : "启动";
-        _startStopButton.Enabled = hasCurrent;
-        _closeConfigButton.Enabled = hasCurrent;
-        _reloadButton.Enabled = hasCurrent;
-        _resetButton.Enabled = hasCurrent;
-
-        _engineLabel.Text = running
-            ? $"运行中（tick {_current!.Host.Engine.TickInterval.TotalMilliseconds:F0} ms）"
-            : hasCurrent ? "已停止" : "未加载配置";
-
-        UpdateTreeRunState();
-    }
-
-    /// <summary>重建整棵树。只在配置增删时调，刷新运行标记走 <see cref="UpdateTreeRunState"/>。</summary>
-    private void RefreshTree()
-    {
-        _tree.BeginUpdate();
-        _tree.Nodes.Clear();
-
-        foreach (SimulatorSession config in _configs)
+        foreach (ListViewItem item in _overview.Items)
         {
-            var configNode = new TreeNode(config.DisplayNameWithState)
-            {
-                Tag = config,
-                ToolTipText = config.ToolTip,
-            };
-
-            foreach (DeviceRuntime device in config.Host.Devices)
-            {
-                var deviceNode = new TreeNode($"{device.Config.Id}  ({device.Config.Ip}:{device.Config.Port})")
-                {
-                    Tag = device,
-                };
-
-                foreach (StationRuntime station in device.Stations)
-                {
-                    deviceNode.Nodes.Add(new TreeNode($"站台 {station.StationNo}") { Tag = station });
-                }
-
-                configNode.Nodes.Add(deviceNode);
-            }
-
-            // 堆垛机不是站台模型，单独挂一层。
-            foreach (SrmDeviceRuntime device in config.Host.SrmDevices)
-            {
-                configNode.Nodes.Add(new TreeNode(
-                    $"{device.DeviceId}  ({device.Config.Ip} 指令{device.Ports.Command})")
-                {
-                    Tag = device,
-                });
-            }
-
-            _tree.Nodes.Add(configNode);
-
-            if (ReferenceEquals(config, _current))
-            {
-                _tree.SelectedNode = configNode;
-            }
-        }
-
-        _tree.ExpandAll();
-        _tree.EndUpdate();
-    }
-
-    /// <summary>只改配置节点的运行标记。重建整棵树会丢掉展开状态与选中项，刷不动。</summary>
-    private void UpdateTreeRunState()
-    {
-        foreach (TreeNode node in _tree.Nodes)
-        {
-            if (node.Tag is not SimulatorSession config)
+            if (item.Tag is not SimulatorSession session)
             {
                 continue;
             }
 
-            string text = config.DisplayNameWithState;
-            if (!string.Equals(node.Text, text, StringComparison.Ordinal))
-            {
-                node.Text = text;
-            }
+            SetSubItem(item, ColumnState, session.IsRunning ? "运行中" : "已停止");
+            SetSubItem(item, ColumnFrames, session.LogRevision.ToString());
+        }
+
+        bool hasAny = _configs.Count > 0;
+        _closeConfigButton.Enabled = hasAny;
+        _startAllButton.Enabled = hasAny && _configs.Exists(static c => !c.IsRunning);
+        _stopAllButton.Enabled = hasAny && _configs.Exists(static c => c.IsRunning);
+
+        int running = _configs.Count(static c => c.IsRunning);
+        _summaryLabel.Text = hasAny
+            ? $"{_configs.Count} 份配置，{running} 份运行中"
+            : "未加载配置";
+    }
+
+    private static void SetSubItem(ListViewItem item, int index, string value)
+    {
+        if (!string.Equals(item.SubItems[index].Text, value, StringComparison.Ordinal))
+        {
+            item.SubItems[index].Text = value;
         }
     }
 
-    private void SaveOpenConfigs()
+    private void OnOverviewDoubleClick(object? sender, EventArgs e)
     {
-        _settings.OpenConfigPaths = [.. _configs.Select(static c => c.Path)];
-        _settings.Save();
+        if (_overview.SelectedItems.Count > 0
+            && _overview.SelectedItems[0].Tag is SimulatorSession session)
+        {
+            OpenSessionWindow(session);
+        }
     }
 
     // ---- 工具栏 ----
 
-    private async void OnStartStopClick(object? sender, EventArgs e)
-    {
-        if (_busy || _current is null)
-        {
-            return;
-        }
-
-        SimulatorSession config = _current;
-        _busy = true;
-
-        try
-        {
-            if (config.IsRunning)
-            {
-                await config.Host.StopAsync();
-                SetStatus($"已停止：{config.DisplayName}");
-            }
-            else
-            {
-                await config.Host.StartAsync();
-                SetStatus($"运行中：{config.DisplayName}");
-            }
-
-            UpdateRunState();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                this,
-                $"操作失败：{ex.Message}\n\n{config.DisplayName}",
-                "错误",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
     private async void OnStartAllClick(object? sender, EventArgs e)
     {
-        if (_busy || _configs.Count == 0)
+        if (_busy)
         {
             return;
         }
@@ -591,21 +342,13 @@ internal sealed class MainForm : Form
 
         try
         {
-            foreach (SimulatorSession config in _configs.Where(static c => !c.IsRunning).ToList())
+            foreach (SimulatorSession session in _configs.Where(static c => !c.IsRunning).ToList())
             {
-                try
-                {
-                    await config.Host.StartAsync();
-                }
-                catch (Exception ex)
-                {
-                    // 一份起不来（多半是端口被占）不该拦着其它的。
-                    SetStatus($"{config.DisplayName} 启动失败：{ex.Message}");
-                }
+                // 一份起不来（多半是端口被占）不该拦着其它的。
+                await SessionCommands.StartAsync(session, this, SetStatus).ConfigureAwait(true);
             }
 
-            UpdateRunState();
-            SetStatus($"已启动 {_configs.Count(static c => c.IsRunning)}/{_configs.Count} 份配置");
+            RefreshOverview();
         }
         finally
         {
@@ -624,12 +367,12 @@ internal sealed class MainForm : Form
 
         try
         {
-            foreach (SimulatorSession config in _configs.Where(static c => c.IsRunning).ToList())
+            foreach (SimulatorSession session in _configs.Where(static c => c.IsRunning).ToList())
             {
-                await config.Host.StopAsync();
+                await SessionCommands.StopAsync(session, SetStatus).ConfigureAwait(true);
             }
 
-            UpdateRunState();
+            RefreshOverview();
             SetStatus("已停止全部配置");
         }
         finally
@@ -638,7 +381,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private async void OnOpenConfigClick(object? sender, EventArgs e)
+    private void OnOpenConfigClick(object? sender, EventArgs e)
     {
         if (_busy)
         {
@@ -647,11 +390,14 @@ internal sealed class MainForm : Form
 
         using var dialog = new OpenFileDialog
         {
-            Title = "选择模拟器配置（可重复打开，多份并存）",
+            Title = "选择模拟器配置（可多份并存）",
             Filter = "配置文件 (*.json)|*.json|所有文件 (*.*)|*.*",
         };
 
-        string startFrom = _current?.Path ?? _settings.OpenConfigPaths.FirstOrDefault() ?? Path.Combine("config", "simulator.json");
+        string startFrom = _configs.FirstOrDefault()?.Path
+            ?? _settings.OpenConfigPaths.FirstOrDefault()
+            ?? Path.Combine("config", "simulator.json");
+
         string fullPath = Path.GetFullPath(startFrom);
         string? directory = Path.GetDirectoryName(fullPath);
 
@@ -660,130 +406,75 @@ internal sealed class MainForm : Form
             dialog.InitialDirectory = directory;
         }
 
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            await LoadOrReplaceAsync(dialog.FileName);
-        }
-    }
-
-    private async void OnCloseConfigClick(object? sender, EventArgs e)
-    {
-        if (_busy || _current is null)
+        if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        SimulatorSession closing = _current;
-        _busy = true;
-
-        try
-        {
-            await CloseConfigurationAsync(closing);
-            SaveOpenConfigs();
-
-            if (_configs.Count > 0)
-            {
-                RefreshTree();
-                PresentConfiguration(_configs[0]);
-                SetStatus($"已关闭：{closing.DisplayName}");
-            }
-            else
-            {
-                RefreshTree();
-                UpdateRunState();
-                _configLabel.Text = string.Empty;
-                SetStatus("已关闭全部配置，请用「打开配置…」再选一份");
-            }
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    private async void OnReloadClick(object? sender, EventArgs e)
-    {
-        if (_busy || _current is null)
+        if (!TryAddConfiguration(dialog.FileName, out SimulatorSession? added) || added is null)
         {
             return;
         }
 
-        _busy = true;
-        string path = _current.Path;
-
-        try
-        {
-            if (await LoadOrReplaceAsync(path))
-            {
-                SetStatus($"已重新加载：{Path.GetFileName(path)}");
-            }
-        }
-        finally
-        {
-            _busy = false;
-        }
+        SaveOpenConfigs();
+        RebuildOverview();
+        OpenSessionWindow(added);
     }
 
-    private async void OnConfigGenerated(object? sender, string configPath)
+    private void OnCloseConfigClick(object? sender, EventArgs e)
     {
-        (string csvPath, string outputPath) = _importView.ReadPaths();
-        _settings.LastCsvPath = csvPath;
-        _settings.LastOutputPath = outputPath;
+        if (_busy || _overview.SelectedItems.Count == 0)
+        {
+            SetStatus("先在列表里选中一份配置");
+            return;
+        }
+
+        if (_overview.SelectedItems[0].Tag is not SimulatorSession session)
+        {
+            return;
+        }
+
+        // 窗口开着就关窗口（它会停服务并走 OnSessionWindowClosed 收尾）；
+        // 没开窗口的（比如启动时只加载没呈现）直接摘掉。
+        if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? window))
+        {
+            window.Close();
+            return;
+        }
+
+        _ = CloseWithoutWindowAsync(session);
+    }
+
+    private async Task CloseWithoutWindowAsync(SimulatorSession session)
+    {
+        await session.DisposeAsync().ConfigureAwait(true);
+
+        _configs.Remove(session);
+        SaveOpenConfigs();
+        RebuildOverview();
+
+        SetStatus($"已关闭：{session.DisplayName}");
+    }
+
+    private void SaveOpenConfigs()
+    {
+        _settings.OpenConfigPaths = [.. _configs.Select(static c => c.Path)];
         _settings.Save();
-
-        DialogResult answer = MessageBox.Show(
-            this,
-            $"配置已生成：\n{Path.GetFullPath(configPath)}\n\n是否立即加载这份配置？",
-            "配置生成完成",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Question);
-
-        if (answer == DialogResult.Yes)
-        {
-            await LoadOrReplaceAsync(configPath);
-        }
     }
 
-    private void OnTreeSelect(object? sender, TreeViewEventArgs e)
-    {
-        // 选中设备/站台节点时也切到它所属的那份配置。
-        SimulatorSession? config = e.Node?.Tag as SimulatorSession
-            ?? e.Node?.Parent?.Tag as SimulatorSession;
-
-        if (config is not null && !ReferenceEquals(config, _current))
-        {
-            PresentConfiguration(config);
-        }
-    }
-
-    private void OnUiTick(object? sender, EventArgs e)
+    /// <summary>把后台线程来的状态消息封送回 UI 线程。</summary>
+    private void PostStatus(string message)
     {
         try
         {
-            UpdateTreeRunState();
-
-            if (_current is null)
+            if (IsHandleCreated && !IsDisposed)
             {
-                return;
+                BeginInvoke(() => SetStatus(message));
             }
-
-            // 报文日志来自当前这份配置自己的环形缓冲——每份配置一条流水，互不掺和。
-            FrameLogEntry[] batch = _current.FrameLog.TakeSince(_frameVersion, maxItems: 2000, out long nextVersion);
-            _frameVersion = nextVersion;
-
-            if (batch.Length > 0)
-            {
-                _frameView.Append(batch);
-                _frameCounterLabel.Text = $"报文 {_current.LogRevision}";
-            }
-
-            _pointView.RefreshDirty();
-            _stateView.Update(_current.Host.Engine.Snapshots());
-            _faultView.RefreshHits();
         }
-        catch (Exception ex)
+        catch (InvalidOperationException)
         {
-            SetStatus($"刷新失败：{ex.Message}");
+            // 窗口正在销毁，丢一条状态日志无妨。
         }
     }
 

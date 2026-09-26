@@ -4,7 +4,7 @@ using PlcSimulator.Devices.Stations;
 using PlcSimulator.Devices.Topology;
 using PlcSimulator.Hosting;
 
-namespace PlcSimulator.App.Views;
+namespace PlcSimulator.App.Conveyor;
 
 /// <summary>
 /// 「路径诊断」页：填起点与目标站台号，把寻路过程摊开 —— 逐跳选了哪个邻居、
@@ -14,7 +14,7 @@ namespace PlcSimulator.App.Views;
 /// 因此两边结论必然一致。**只读**：不下发任务、不碰数据区，随时可反复查。
 /// </para>
 /// </summary>
-internal sealed class PathDiagnosticView : UserControl
+public sealed class PathDiagnosticView : UserControl
 {
     private const int Pad = 12;
     private const int RowHeight = 26;

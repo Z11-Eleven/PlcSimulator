@@ -3,7 +3,7 @@ using PlcSimulator.Core.Protocols;
 using PlcSimulator.Devices;
 using PlcSimulator.Hosting;
 
-namespace PlcSimulator.App.Views;
+namespace PlcSimulator.App.Conveyor;
 
 /// <summary>
 /// 点位监视表：逐字段显示每个站台的当前值，可直接改值（相当于代替 WCS 下发）。
@@ -12,7 +12,7 @@ namespace PlcSimulator.App.Views;
 /// 只对可见行取值，并且只刷新被写入过的行（依赖数据区的脏区追踪），而不是遍历全表。
 /// </para>
 /// </summary>
-internal sealed class PointMonitorView : UserControl
+public sealed class PointMonitorView : UserControl
 {
     private const int ColumnDevice = 0;
     private const int ColumnStation = 1;

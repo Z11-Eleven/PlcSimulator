@@ -1,13 +1,13 @@
 using PlcSimulator.App.Shared;
 using PlcSimulator.Core.Faults;
 
-namespace PlcSimulator.App.Views;
+namespace PlcSimulator.App.Conveyor;
 
 /// <summary>
 /// 故障注入面板：列出配置里的规则，可以运行时逐条开关。
 /// 规则本身的增删改仍需编辑配置文件后重新加载。
 /// </summary>
-internal sealed class FaultInjectionView : UserControl
+public sealed class FaultInjectionView : UserControl
 {
     private const int ColumnEnabled = 0;
     private const int ColumnName = 1;
