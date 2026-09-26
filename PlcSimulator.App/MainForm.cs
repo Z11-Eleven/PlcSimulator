@@ -29,6 +29,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripButton _closeConfigButton = new("关闭配置");
     private readonly ToolStripButton _startAllButton = new("全部启动");
     private readonly ToolStripButton _stopAllButton = new("全部停止");
+    private readonly ToolStripButton _generateConfigButton = new("配置生成…");
     private readonly ToolStripLabel _statusLabel = new("未加载配置");
 
     private readonly ListView _overview = new();
@@ -41,13 +42,13 @@ internal sealed class MainForm : Form
     /// <summary>已经开出来的子窗口，按配置路径索引（不区分大小写，与判重口径一致）。</summary>
     private readonly Dictionary<string, SimulatorWindowBase> _windows = new(StringComparer.OrdinalIgnoreCase);
 
-    private SimulatorSession? _pendingPresent;
+    private readonly List<SimulatorSession> _pendingPresent = [];
     private bool _busy;
 
     /// <summary>
-    /// <paramref name="configPath"/> 非空时只开那一份；为空时把上次打开的几份都挂上。
+    /// <paramref name="configPaths"/> 为空时把上次打开的几份都挂上；给了就只挂这几份。
     /// </summary>
-    public MainForm(string? configPath)
+    public MainForm(IReadOnlyList<string> configPaths)
     {
         Text = "潜江太蓝 PLC 模拟器";
         MinimumSize = new Size(900, 500);
@@ -55,7 +56,7 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
 
         BuildLayout();
-        LoadInitialConfigurations(configPath);
+        LoadInitialConfigurations(configPaths);
 
         _uiTimer.Interval = UiRefreshMs;
         _uiTimer.Tick += (_, _) => RefreshOverview();
@@ -66,17 +67,20 @@ internal sealed class MainForm : Form
     {
         base.OnShown(e);
 
-        if (_pendingPresent is null)
+        if (_pendingPresent.Count == 0)
         {
             return;
         }
 
-        SimulatorSession session = _pendingPresent;
-        _pendingPresent = null;
-
         // 呈现在这里而不是构造函数里：那时本窗口还没有句柄与位置，
         // 子窗口以它为 owner 时定位与显示都没有可依据的坐标。
-        OpenSessionWindow(session);
+        SimulatorSession[] pending = [.. _pendingPresent];
+        _pendingPresent.Clear();
+
+        foreach (SimulatorSession session in pending)
+        {
+            OpenSessionWindow(session);
+        }
     }
 
     protected override async void OnFormClosing(FormClosingEventArgs e)
@@ -120,12 +124,15 @@ internal sealed class MainForm : Form
         _toolStrip.Items.Add(_openConfigButton);
         _toolStrip.Items.Add(_closeConfigButton);
         _toolStrip.Items.Add(new ToolStripSeparator());
+        _toolStrip.Items.Add(_generateConfigButton);
+        _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_statusLabel);
 
         _startAllButton.Click += OnStartAllClick;
         _stopAllButton.Click += OnStopAllClick;
         _openConfigButton.Click += OnOpenConfigClick;
         _closeConfigButton.Click += OnCloseConfigClick;
+        _generateConfigButton.Click += OnGenerateConfigClick;
 
         _overview.Dock = DockStyle.Fill;
         _overview.View = View.Details;
@@ -151,10 +158,10 @@ internal sealed class MainForm : Form
 
     // ---- 加载与呈现 ----
 
-    private void LoadInitialConfigurations(string? commandLinePath)
+    private void LoadInitialConfigurations(IReadOnlyList<string> commandLinePaths)
     {
-        List<string> paths = !string.IsNullOrWhiteSpace(commandLinePath)
-            ? [commandLinePath]
+        List<string> paths = commandLinePaths.Count > 0
+            ? [.. commandLinePaths]
             : [.. _settings.OpenConfigPaths.Where(File.Exists)];
 
         if (paths.Count == 0)
@@ -176,7 +183,10 @@ internal sealed class MainForm : Form
 
         if (_configs.Count > 0)
         {
-            _pendingPresent = _configs[0];
+            // 命令行明确点名的都开出来；从设置恢复的只开第一份，
+            // 免得攒了一堆配置的人每次启动被弹一屏窗口。
+            _pendingPresent.AddRange(
+                commandLinePaths.Count > 0 ? _configs : [_configs[0]]);
         }
 
         SetStatus(_configs.Count switch
@@ -454,6 +464,54 @@ internal sealed class MainForm : Form
         RebuildOverview();
 
         SetStatus($"已关闭：{session.DisplayName}");
+    }
+
+    private void OnGenerateConfigClick(object? sender, EventArgs e)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        using var dialog = new ConfigGeneratorForm(
+            _settings.LastCsvPath ?? string.Empty,
+            _settings.LastOutputPath ?? Path.Combine("config", "simulator.generated.json"));
+
+        dialog.ConfigGenerated += OnConfigGenerated;
+        dialog.ShowDialog(this);
+    }
+
+    private void OnConfigGenerated(object? sender, string configPath)
+    {
+        if (sender is ConfigGeneratorForm form)
+        {
+            // 记住这次的输入输出路径，下次打开直接回填。
+            (string csvPath, string outputPath) = form.ReadPaths();
+            _settings.LastCsvPath = csvPath;
+            _settings.LastOutputPath = outputPath;
+            _settings.Save();
+        }
+
+        DialogResult answer = MessageBox.Show(
+            this,
+            $"配置已生成：\n{Path.GetFullPath(configPath)}\n\n是否立即加载这份配置？",
+            "配置生成完成",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+
+        if (answer != DialogResult.Yes)
+        {
+            return;
+        }
+
+        if (!TryAddConfiguration(configPath, out SimulatorSession? added) || added is null)
+        {
+            return;
+        }
+
+        SaveOpenConfigs();
+        RebuildOverview();
+        OpenSessionWindow(added);
     }
 
     private void SaveOpenConfigs()

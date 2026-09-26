@@ -1,13 +1,29 @@
-namespace PlcSimulator.App;
+using PlcSimulator.App;
 
-internal static class Program
+ApplicationConfiguration.Initialize();
+
+// 全局兜底：原先 UI 线程一抛异常进程就直接消失，用户只看到窗口没了、毫无线索。
+Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+Application.ThreadException += (_, e) => ReportFatal(e.Exception);
+AppDomain.CurrentDomain.UnhandledException += (_, e) => ReportFatal(e.ExceptionObject as Exception);
+
+// 命令行可以一次给多份配置，各自开一个模拟器窗口。
+Application.Run(new MainForm(args));
+
+static void ReportFatal(Exception? exception)
 {
-    [STAThread]
-    private static void Main(string[] args)
-    {
-        ApplicationConfiguration.Initialize();
+    string message = exception?.Message ?? "未知错误";
 
-        // 没给路径时由调试台自己决定：先用上次在界面上打开过的配置，再退回默认路径。
-        Application.Run(new MainForm(args.Length > 0 ? args[0] : null));
+    try
+    {
+        MessageBox.Show(
+            $"发生未处理的错误：\n\n{message}\n\n{exception?.StackTrace}",
+            "错误",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+    }
+    catch (Exception)
+    {
+        // 连弹框都失败就没别的办法了。
     }
 }
