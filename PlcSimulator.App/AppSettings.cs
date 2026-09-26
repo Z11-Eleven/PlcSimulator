@@ -16,7 +16,18 @@ internal sealed class AppSettings
 
     private static readonly string SettingsFile = Path.Combine(SettingsDirectory, "settings.json");
 
-    /// <summary>上次打开的配置文件；启动时命令行没给路径就用它。</summary>
+    /// <summary>
+    /// 上次打开的那几份配置；下次启动命令行没给路径时全部自动加载。
+    /// <para>
+    /// 调试台支持同时挂多份（比如输送线一份、堆垛机一份），所以这里记的是列表而不是单个路径。
+    /// </para>
+    /// </summary>
+    public List<string> OpenConfigPaths { get; set; } = [];
+
+    /// <summary>
+    /// 旧版只记得住一份配置。这个字段只为读得懂老设置文件而留：
+    /// <see cref="Load"/> 会把它迁进 <see cref="OpenConfigPaths"/> 后清空，不再写回。
+    /// </summary>
     public string? LastConfigPath { get; set; }
 
     /// <summary>「配置生成」页上次选的 CSV 导出文件。</summary>
@@ -34,8 +45,18 @@ internal sealed class AppSettings
                 return new AppSettings();
             }
 
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsFile))
+            AppSettings settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsFile))
                 ?? new AppSettings();
+
+            // 老设置文件里只有单个 LastConfigPath：不迁移的话，用户升级后
+            // 上次打开的配置会悄悄"丢失"，退回默认那份。
+            if (settings.OpenConfigPaths.Count == 0 && !string.IsNullOrWhiteSpace(settings.LastConfigPath))
+            {
+                settings.OpenConfigPaths.Add(settings.LastConfigPath);
+                settings.LastConfigPath = null;
+            }
+
+            return settings;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
