@@ -47,7 +47,10 @@ public abstract class SimulatorWindowBase : Form
         Text = $"{WindowKind} — {session.DisplayName}";
         MinimumSize = new Size(900, 600);
         Size = new Size(1200, 780);
-        StartPosition = FormStartPosition.CenterParent;
+
+        // 位置由主窗口给（层叠错开）。用 CenterParent 的话多个子窗口会全部落在主窗口
+        // 正中央、完全重叠，同时开两个状态机就只能看见最上面那个。
+        StartPosition = FormStartPosition.Manual;
 
         BuildLayout();
 

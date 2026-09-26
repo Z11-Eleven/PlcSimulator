@@ -43,6 +43,9 @@ internal sealed class MainForm : Form
     private readonly Dictionary<string, SimulatorWindowBase> _windows = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly List<SimulatorSession> _pendingPresent = [];
+    /// <summary>新开窗口的层叠序号，让多个子窗口在屏幕上错开而不是完全重叠。</summary>
+    private int _windowCascade;
+
     private bool _busy;
 
     /// <summary>
@@ -258,9 +261,26 @@ internal sealed class MainForm : Form
         window.FormClosed += (_, _) => OnSessionWindowClosed(session);
 
         _windows[session.Path] = window;
-        window.Show(this);
+
+        // 不用 Show(this)：给了 owner 之后子窗口会**永远**浮在主窗口之上，
+        // 用户想让主窗口或别的窗口盖住它就做不到，开两个状态机时互相挡着。
+        // 落点在屏幕上依次错开，免得新窗口正好压在已有的那个上面。
+        window.Location = NextWindowLocation();
+        window.Show();
 
         SetStatus($"已打开：{session.DisplayName}（{session.DeviceSummary}）");
+    }
+
+    /// <summary>新窗口的落点：沿屏幕左上方向右下层叠错开。</summary>
+    private Point NextWindowLocation()
+    {
+        Rectangle area = Screen.FromControl(this).WorkingArea;
+
+        int step = _windowCascade++ % 5 * 32;
+
+        return new Point(
+            Math.Min(area.Left + 80 + step, Math.Max(area.Left, area.Right - 420)),
+            Math.Min(area.Top + 60 + step, Math.Max(area.Top, area.Bottom - 320)));
     }
 
     private void OnSessionWindowClosed(SimulatorSession session)
