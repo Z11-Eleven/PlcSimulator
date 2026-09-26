@@ -76,7 +76,9 @@ public sealed record StationLiveNote(
     string Label,
     string StateText,
     bool Manual,
-    bool Busy,
+
+    /// <summary>收不下上游送来的托盘（站上有货 / 正在作业 / 等 WCS 清零）。</summary>
+    bool NotAccepting,
     string LastEvent);
 
 /// <summary>按当前运行状态推演托盘实际会走到哪。</summary>
@@ -298,9 +300,9 @@ public sealed record PathDiagnosticReport
                 flags.Add("手动");
             }
 
-            if (station.Busy)
+            if (station.NotAccepting)
             {
-                flags.Add("忙");
+                flags.Add("收不下");
             }
 
             string suffix = flags.Count > 0 ? $"  ← {string.Join("、", flags)}" : string.Empty;

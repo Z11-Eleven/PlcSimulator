@@ -389,4 +389,40 @@ public class HopByHopTransferTests
 
         Assert.Equal(StationState.Executing, line.Machine("1004").State);
     }
+
+    [Fact]
+    public void SecondPallet_TargetHoldsWaitingPallet_StopsAtPreviousStation()
+    {
+        // 先后两个托盘去同一个目标站。第一个送达后停在站上等 WCS（有货待命），
+        // 第二个走到目标的前一站时必须停下等——「有货待命」不是「作业中」，
+        // 但站上有货，送进去会把前一个托盘的任务信息覆盖掉。
+        Line line = CreateLine();
+
+        SendTask(line, from: "1001", to: 1004, taskNum: 5001);
+        AdvanceUntilHasCargo(line, "1004");
+        Assert.Equal(StationState.Loaded, line.Machine("1004").State);
+        Assert.Equal(5001, line.Station("1004").ReadIncomingU16("tasknum"));
+
+        // 第一个任务收尾，起点回空闲，才下得进第二个任务
+        AdvanceUntil(
+            line.Engine,
+            () => line.Machine("1001").State == StationState.Done,
+            "起点站未进入待清零");
+        WcsWriteU16(line.Station("1001"), 8, 2);
+        Advance(line.Engine, 200);
+        Assert.Equal(StationState.Idle, line.Machine("1001").State);
+
+        SendTask(line, from: "1001", to: 1004, taskNum: 5002);
+        AdvanceUntilHasCargo(line, "1003");   // 走到 1004 的前一站
+        Advance(line.Engine, 3000);           // 再等一会儿，确认它不会往前送
+
+        // 停在 1003 等，托盘与任务信息都在
+        Assert.Equal(StationState.WaitingDownstream, line.Machine("1003").State);
+        Assert.True(HasCargo(line.Station("1003")));
+        Assert.Equal(5002, line.Station("1003").ReadIncomingU16("tasknum"));
+
+        // 1004 上第一个托盘的信息原样保留
+        Assert.Equal(StationState.Loaded, line.Machine("1004").State);
+        Assert.Equal(5001, line.Station("1004").ReadIncomingU16("tasknum"));
+    }
 }

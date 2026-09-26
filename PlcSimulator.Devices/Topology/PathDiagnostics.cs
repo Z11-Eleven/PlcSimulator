@@ -354,13 +354,18 @@ public static class PathDiagnostics
             if (snapshots.TryGetValue(stationNo, out StationSnapshot snapshot))
             {
                 stations.Add(new StationLiveNote(
-                    stationNo, label, snapshot.StateText, snapshot.Manual, snapshot.IsBusy, snapshot.LastEvent));
+                    stationNo,
+                    label,
+                    snapshot.StateText,
+                    snapshot.Manual,
+                    !snapshot.CanAcceptCargo,
+                    snapshot.LastEvent));
 
                 if (snapshot.Fault)
                 {
-                    // 故障只把本站的推进冻住，IsBusy 仍是 false —— 托盘照样会被送进去。
+                    // 故障只把本站的推进冻住，判定上不算占用 —— 托盘照样会被送进去。
                     notes.Add($"{label} 处于故障：模拟器的故障只冻结本站推进，"
-                        + "不会阻止托盘送入（判定上不算忙）");
+                        + "不会阻止托盘送入（判定上不算收不下）");
                 }
             }
             else
@@ -403,9 +408,9 @@ public static class PathDiagnostics
                 return StopAt(i, $"下游站台 {LabelOf(next)} 处于手动，托盘留在本站等待");
             }
 
-            if (snapshot.IsBusy)
+            if (!snapshot.CanAcceptCargo)
             {
-                return StopAt(i, $"下游站台 {LabelOf(next)} 忙（{snapshot.StateText}），托盘留在本站等待");
+                return StopAt(i, $"下游站台 {LabelOf(next)} 收不下（{snapshot.StateText}），托盘留在本站等待");
             }
 
             // 提升机不能停盘：发车前要多看一站，下一站收不下就留在提升机的前一站。

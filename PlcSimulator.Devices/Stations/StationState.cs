@@ -36,15 +36,30 @@ public enum StationState
 /// </summary>
 internal static class StationStateRules
 {
-    /// <summary>正在作业：处于这些状态时目标站台不接收新货（「待清零」也算忙）。</summary>
+    /// <summary>正在作业：有任务在处理或货物在途。用于显示，以及判断「本站能否受理新任务」。</summary>
     public static bool IsBusy(StationState state)
         => state is StationState.Executing
             or StationState.WaitingDownstream
             or StationState.Transferring
             or StationState.Done;
 
-    /// <summary>能否再接收上游送来的托盘：正在作业或处于手动都不接收。</summary>
-    public static bool CanAccept(StationState state, bool manual) => !IsBusy(state) && !manual;
+    /// <summary>
+    /// 站台被占用，收不下上游送来的新托盘：站上有货（含停在站上等 WCS 处置的「有货待命」）、
+    /// 货物在途、或还在等 WCS 清零。
+    /// <para>
+    /// 与 <see cref="IsBusy"/> 的区别在「有货待命」：那不是「作业中」，但站上确实有托盘，
+    /// 收新货会把它的任务信息覆盖掉。只有空闲才收得下。
+    /// </para>
+    /// </summary>
+    public static bool IsOccupied(StationState state)
+        => state is StationState.Loaded
+            or StationState.Executing
+            or StationState.WaitingDownstream
+            or StationState.Transferring
+            or StationState.Done;
+
+    /// <summary>能否再接收上游送来的托盘：站台被占用或处于手动都收不下。</summary>
+    public static bool CanAccept(StationState state, bool manual) => !IsOccupied(state) && !manual;
 }
 
 /// <summary>站台状态与现场数据的只读快照，供 GUI 流程面板与站台状态图使用。</summary>

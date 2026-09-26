@@ -109,14 +109,15 @@ public sealed class ConveyorStationMachine
 
     public string LastEvent { get; private set; }
 
-    /// <summary>该站台是否正在作业（有任务在处理或货物在途）。目标站台此时不接收新货。</summary>
+    /// <summary>该站台是否正在作业（有任务在处理或货物在途）。</summary>
     public bool IsBusy => StationStateRules.IsBusy(_state);
 
     /// <summary>本站是否处于手动。</summary>
     public bool IsManual => _manual;
 
     /// <summary>
-    /// 本站能否再接收上游送来的托盘：正在作业（动作中/在途/待清零）或处于手动时都不接收。
+    /// 本站能否再接收上游送来的托盘：站上有货（含停在站上等 WCS 处置的）、正在作业、
+    /// 或处于手动时都收不下。
     /// </summary>
     public bool CanAcceptCargo => StationStateRules.CanAccept(_state, _manual);
 
@@ -449,9 +450,17 @@ public sealed class ConveyorStationMachine
         => string.Equals(_station.Config.Remark, "提升机", StringComparison.Ordinal);
 
     private string BlockedReason()
-        => _stationLookup?.Invoke(_cargoTargetStationNo)?.IsManual == true
-            ? $"下游站台 {_cargoTargetStationNo} 处于手动，托盘留在本站等待"
-            : $"下游站台 {_cargoTargetStationNo} 忙，托盘留在本站等待";
+    {
+        ConveyorStationMachine? target = _stationLookup?.Invoke(_cargoTargetStationNo);
+
+        if (target?.IsManual == true)
+        {
+            return $"下游站台 {_cargoTargetStationNo} 处于手动，托盘留在本站等待";
+        }
+
+        string state = target is null ? "不可用" : target.Snapshot().StateText;
+        return $"下游站台 {_cargoTargetStationNo} 收不下（{state}），托盘留在本站等待";
+    }
 
     /// <summary>
     /// 托盘真正离站：整份任务信息（含目标站台）一起清掉，本站置为无货。
@@ -493,10 +502,10 @@ public sealed class ConveyorStationMachine
 
         if (!target.CanAcceptCargo)
         {
-            // 堵塞：目标站台正在作业或被打了手动，货物在线上等待，不丢失也不覆盖。
+            // 堵塞：目标站台上有货 / 正在作业 / 被打了手动，货物在线上等待，不丢失也不覆盖。
             string reason = target.IsManual
                 ? $"目标站台 {_cargoTargetStationNo} 处于手动，货物在线上等待（堵塞）"
-                : $"目标站台 {_cargoTargetStationNo} 忙，货物在线上等待（堵塞）";
+                : $"目标站台 {_cargoTargetStationNo} 收不下，货物在线上等待（堵塞）";
 
             if (!string.Equals(LastEvent, reason, StringComparison.Ordinal))
             {

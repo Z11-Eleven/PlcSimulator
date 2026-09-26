@@ -399,7 +399,7 @@ public class PathDiagnosticsTests
         PathDiagnosticReport report = AnalyzeLive(device, engine, "1001", "1003");
 
         Assert.Equal("1001", report.Live!.StopStationNo);
-        Assert.Contains("忙", report.Live.StopReason!, StringComparison.Ordinal);
+        Assert.Contains("收不下", report.Live.StopReason!, StringComparison.Ordinal);
     }
 
     [Fact]
