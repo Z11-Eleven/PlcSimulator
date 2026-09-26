@@ -415,15 +415,9 @@ internal sealed class MainForm : Form
             return;
         }
 
-        using var dialog = new OpenFileDialog
-        {
-            Title = "选择模拟器配置（可多份并存）",
-            Filter = "配置文件 (*.json)|*.json|所有文件 (*.*)|*.*",
-            // 必须用旧式对话框：Vista 风格的 IFileDialog.Show 在本机会卡住不返回，
-            // 现象是点「打开配置…」后进程直接无响应、对话框也不出现（dotnet-stack
-            // 抓到主线程停在 IFileDialog.Show 里）。旧式对话框实测正常。
-            AutoUpgradeEnabled = false,
-        };
+        using OpenFileDialog dialog = FileDialogs.Open(
+            "选择模拟器配置（可多份并存）",
+            "配置文件 (*.json)|*.json|所有文件 (*.*)|*.*");
 
         string startFrom = _configs.FirstOrDefault()?.Path
             ?? _settings.OpenConfigPaths.FirstOrDefault()

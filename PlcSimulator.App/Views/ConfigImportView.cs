@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using PlcSimulator.App.Shared;
 using PlcSimulator.Core.Configuration;
 using PlcSimulator.Import;
 
@@ -209,11 +210,9 @@ internal sealed class ConfigImportView : UserControl
 
     private void OnBrowseCsvClick(object? sender, EventArgs e)
     {
-        using var dialog = new OpenFileDialog
-        {
-            Title = "选择 wcs_opcitem 的导出（.xlsx 或 .csv）",
-            Filter = "点位表 (*.xlsx;*.csv)|*.xlsx;*.csv|Excel 工作簿 (*.xlsx)|*.xlsx|CSV 文件 (*.csv)|*.csv|所有文件 (*.*)|*.*",
-        };
+        using OpenFileDialog dialog = FileDialogs.Open(
+            "选择 wcs_opcitem 的导出（.xlsx 或 .csv）",
+            "点位表 (*.xlsx;*.csv)|*.xlsx;*.csv|Excel 工作簿 (*.xlsx)|*.xlsx|CSV 文件 (*.csv)|*.csv|所有文件 (*.*)|*.*");
 
         if (!string.IsNullOrWhiteSpace(_csvPath.Text) && File.Exists(_csvPath.Text))
         {
@@ -234,15 +233,14 @@ internal sealed class ConfigImportView : UserControl
 
     private void OnBrowseOutputClick(object? sender, EventArgs e)
     {
-        using var dialog = new SaveFileDialog
-        {
-            Title = "选择生成的配置文件保存位置",
-            Filter = "配置文件 (*.json)|*.json|所有文件 (*.*)|*.*",
-            DefaultExt = "json",
-            FileName = string.IsNullOrWhiteSpace(_outputPath.Text)
-                ? "simulator.generated.json"
-                : Path.GetFileName(_outputPath.Text),
-        };
+        using SaveFileDialog dialog = FileDialogs.Save(
+            "选择生成的配置文件保存位置",
+            "配置文件 (*.json)|*.json|所有文件 (*.*)|*.*");
+
+        dialog.DefaultExt = "json";
+        dialog.FileName = string.IsNullOrWhiteSpace(_outputPath.Text)
+            ? "simulator.generated.json"
+            : Path.GetFileName(_outputPath.Text);
 
         if (!string.IsNullOrWhiteSpace(_outputPath.Text))
         {

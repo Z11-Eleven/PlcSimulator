@@ -110,12 +110,11 @@ public sealed class FrameLogView : UserControl
 
     private void ExportWithDialog()
     {
-        using var dialog = new SaveFileDialog
-        {
-            Title = "导出报文日志",
-            Filter = "CSV 文件|*.csv|文本文件|*.txt",
-            FileName = $"frames-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
-        };
+        using SaveFileDialog dialog = FileDialogs.Save(
+            "导出报文日志",
+            "CSV 文件|*.csv|文本文件|*.txt");
+
+        dialog.FileName = $"frames-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
