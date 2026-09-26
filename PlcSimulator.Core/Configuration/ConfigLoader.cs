@@ -62,8 +62,9 @@ public static class ConfigLoader
         }
 
         // 同一端点下站号重复时，解析器按站号查只会命中第一台，后面的设备永远不可达。
+        // 只对 Modbus 设备做这项检查：Socket 设备没有站号，用默认值会把它们两两误报成冲突。
         foreach (IGrouping<(string Ip, int Port), DeviceConfig> group in config.Devices
-            .Where(static d => d.Enabled)
+            .Where(static d => d.Enabled && IsModbusDevice(d))
             .GroupBy(static d => (d.Ip, d.Port)))
         {
             HashSet<byte> slaveIds = [];
@@ -95,6 +96,14 @@ public static class ConfigLoader
             if (!IPAddress.TryParse(device.Ip, out _))
             {
                 errors.Add($"设备 {label} 的 ip \"{device.Ip}\" 不是合法地址。");
+            }
+
+            // Socket 设备是另一套模型：没有站号、没有寄存器块，端口来自 socketPorts 而不是 port，
+            // 因此走单独的校验分支，不落到下面的 Modbus 检查上。
+            if (IsSocketDevice(device))
+            {
+                ValidateSrmDevice(device, label, errors, warnings, endpoints);
+                continue;
             }
 
             if (device.Port is < 1 or > 65535)
@@ -148,6 +157,112 @@ public static class ConfigLoader
             warnings.Add(
                 $"故障规则 {label} 的 effect \"{rule.Effect}\" 无法识别，运行期会按 ExceptionResponse 处理。"
                 + $"可用：{string.Join("、", known)}。");
+        }
+    }
+
+    private static bool IsModbusDevice(DeviceConfig device)
+        => string.Equals(device.Protocol, "Modbus", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSocketDevice(DeviceConfig device)
+        => string.Equals(device.Protocol, "Socket", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 堆垛机（Socket 传输）的专项校验。它不查站台与寄存器块，
+    /// 查的是三个端口、协议别名与状态帧容量。
+    /// </summary>
+    private static void ValidateSrmDevice(
+        DeviceConfig device,
+        string label,
+        List<string> errors,
+        List<string> warnings,
+        HashSet<(string Ip, int Port)> endpoints)
+    {
+        SocketPortsConfig? ports = device.SocketPorts;
+        if (ports is null)
+        {
+            errors.Add($"设备 {label} 的 protocol 是 Socket，但缺少 socketPorts 配置（三个端口）。");
+            return;
+        }
+
+        (string Name, int Port)[] rolePorts =
+        [
+            ("command", ports.Command),
+            ("status", ports.Status),
+            ("alarm", ports.Alarm),
+        ];
+
+        foreach ((string name, int port) in rolePorts)
+        {
+            if (port is < 1 or > 65535)
+            {
+                errors.Add($"设备 {label} 的 socketPorts.{name}={port} 超出端口范围。");
+            }
+        }
+
+        if (ports.Command == ports.Status || ports.Status == ports.Alarm || ports.Command == ports.Alarm)
+        {
+            errors.Add(
+                $"设备 {label} 的三个 Socket 端口必须互不相同，"
+                + $"当前为 {ports.Command}/{ports.Status}/{ports.Alarm}。");
+        }
+
+        foreach ((string name, int port) in rolePorts)
+        {
+            // 端口被占时 TcpListener.Start() 会抛 SocketException，八台设备全配 127.0.0.1 时
+            // 现场看到的是"启动就崩"，这里在 check 阶段就点明该怎么改。
+            if (!endpoints.Add((device.Ip, port)))
+            {
+                errors.Add(
+                    $"Socket 端点重复：{device.Ip}:{port}（设备 {label} 的 {name} 口）。"
+                    + "多台堆垛机请各用一个回环地址（127.0.0.1、127.0.0.2 …），"
+                    + "并同步改数据库 wcs_equipmentinfo.RIPADDR。");
+            }
+        }
+
+        if (ports.StatusFrameLength < SrmLayout.MinStatusFrameLength)
+        {
+            errors.Add(
+                $"设备 {label} 的 statusFrameLength={ports.StatusFrameLength} 小于 "
+                + $"{SrmLayout.MinStatusFrameLength}，装不下状态字段。");
+        }
+
+        if (ports.AlarmFrameLength < 1)
+        {
+            errors.Add($"设备 {label} 的 alarmFrameLength 必须为正数。");
+        }
+
+        if (!SrmLayout.ProtocolTypeAliases.Contains(device.ProtocolType, StringComparer.OrdinalIgnoreCase))
+        {
+            errors.Add(
+                $"设备 {label} 的 protocolType \"{device.ProtocolType}\" 不是已知的堆垛机对接协议，"
+                + $"可用：{string.Join(", ", SrmLayout.ProtocolTypeAliases)}。");
+        }
+
+        SrmOptionsConfig? srm = device.Srm;
+        if (srm is null)
+        {
+            errors.Add($"设备 {label} 的 protocol 是 Socket，但缺少 srm 配置。");
+            return;
+        }
+
+        if (srm.TravelDelayMs < 0 || srm.ActionDelayMs < 0 || srm.JitterMs < 0)
+        {
+            errors.Add($"设备 {label} 的 srm 延时参数不能为负。");
+        }
+
+        if (srm.ForkCount is < 1 or > 2)
+        {
+            errors.Add($"设备 {label} 的 srm.forkCount={srm.ForkCount} 只能是 1 或 2。");
+        }
+
+        foreach (string station in srm.PickStations.Concat(srm.PutStations))
+        {
+            if (!srm.StationPoints.ContainsKey(station))
+            {
+                warnings.Add(
+                    $"设备 {label} 的站台 {station} 出现在 pickStations/putStations 中，"
+                    + "但 stationPoints 里没有它的动作点，下发指令时会对不上。");
+            }
         }
     }
 

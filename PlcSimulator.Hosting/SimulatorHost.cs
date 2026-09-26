@@ -3,10 +3,13 @@ using PlcSimulator.Core.ByteOrder;
 using PlcSimulator.Core.Configuration;
 using PlcSimulator.Core.Faults;
 using PlcSimulator.Core.Frames;
+using PlcSimulator.Core.Protocol;
 using PlcSimulator.Core.Protocols;
 using PlcSimulator.Devices;
+using PlcSimulator.Devices.Srm;
 using PlcSimulator.Devices.Stations;
 using PlcSimulator.Protocol.Modbus;
+using PlcSimulator.Protocol.Socket;
 
 namespace PlcSimulator.Hosting;
 
@@ -19,8 +22,9 @@ public sealed class SimulatorHost : IAsyncDisposable
     private readonly SimulatorConfig _config;
     private readonly IFrameLog _frameLog;
     private readonly List<DeviceRuntime> _devices = [];
+    private readonly List<SrmDeviceRuntime> _srmDevices = [];
+    private readonly List<IProtocolServer> _servers = [];
     private readonly Dictionary<string, ByteOrderPolicy> _policies = new(StringComparer.OrdinalIgnoreCase);
-    private ModbusTcpServer? _server;
     private Action<string>? _log;
 
     private SimulatorHost(SimulatorConfig config, IFrameLog frameLog)
@@ -45,15 +49,18 @@ public sealed class SimulatorHost : IAsyncDisposable
 
     public IReadOnlyList<DeviceRuntime> Devices => _devices;
 
+    /// <summary>堆垛机设备。与 Modbus 的站台设备分开存放——两者的数据模型不同。</summary>
+    public IReadOnlyList<SrmDeviceRuntime> SrmDevices => _srmDevices;
+
     /// <summary>驱动所有站台状态机的引擎。配置加载后重建，以便把故障注入器带进去。</summary>
     public SimulationEngine Engine { get; private set; } = new();
 
     /// <summary>当前生效的故障注入器。默认是零分配的直通实现。</summary>
     public IFaultInjector FaultInjector { get; private set; } = PassThroughFaultInjector.Instance;
 
-    public IReadOnlyList<IPEndPoint> Endpoints => _server?.Endpoints ?? [];
+    public IReadOnlyList<IPEndPoint> Endpoints => [.. _servers.SelectMany(static s => s.Endpoints)];
 
-    public bool IsRunning => _server?.IsRunning ?? false;
+    public bool IsRunning => _servers.Count > 0;
 
     public static SimulatorHost Create(SimulatorConfig config, IFrameLog? frameLog = null)
     {
@@ -66,33 +73,27 @@ public sealed class SimulatorHost : IAsyncDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_server is not null)
+        if (_servers.Count > 0)
         {
             return;
         }
 
-        List<ModbusEndpointOptions> endpoints = BuildEndpoints();
+        await StartModbusAsync(cancellationToken).ConfigureAwait(false);
+        await StartSocketAsync(cancellationToken).ConfigureAwait(false);
 
-        if (endpoints.Count == 0)
+        if (_servers.Count == 0)
         {
-            throw new InvalidOperationException("没有任何启用的监听端点，请检查 server.listen 配置。");
+            // 两类服务端都起不来才是真错误：只跑堆垛机的配置里 server.listen 本就是空的。
+            throw new InvalidOperationException(
+                "没有任何启用的监听端点：请检查 server.listen 配置，以及 Socket 设备的 socketPorts。");
         }
 
-        _server = new ModbusTcpServer(
-            endpoints,
-            new ModbusServerOptions
-            {
-                MaxConnectionsPerIp = _config.Server.MaxConnectionsPerIp,
-                RecordRawFrames = _config.Server.RecordRawFrames,
-            },
-            _frameLog,
-            FaultInjector);
-
-        await _server.StartAsync(cancellationToken).ConfigureAwait(false);
-
-        foreach (IPEndPoint endpoint in _server.Endpoints)
+        foreach (IProtocolServer server in _servers)
         {
-            Log?.Invoke($"监听 {endpoint.Address}:{endpoint.Port}");
+            foreach (IPEndPoint endpoint in server.Endpoints)
+            {
+                Log?.Invoke($"监听 {endpoint.Address}:{endpoint.Port}（{server.ProtocolName}）");
+            }
         }
 
         foreach (DeviceRuntime device in _devices)
@@ -104,23 +105,81 @@ public sealed class SimulatorHost : IAsyncDisposable
                 + $"IP {device.Config.Ip}:{device.Config.Port} 站号 {device.Config.SlaveId}");
         }
 
+        foreach (SrmDeviceRuntime device in _srmDevices)
+        {
+            Log?.Invoke(
+                $"设备 {device.DeviceId}（{device.Name}）对接协议 {device.Config.ProtocolType}，"
+                + $"货叉 {device.Options.ForkCount} 个，"
+                + $"IP {device.Config.Ip} 端口 指令{device.Ports.Command}"
+                + $"/状态{device.Ports.Status}/报警{device.Ports.Alarm}");
+        }
+
         Engine.Start();
-        Log?.Invoke($"状态机引擎已启动（tick {Engine.TickInterval.TotalMilliseconds:F0} ms，{Engine.Machines.Count} 个站台）。");
+        Log?.Invoke(
+            $"状态机引擎已启动（tick {Engine.TickInterval.TotalMilliseconds:F0} ms，"
+            + $"{Engine.Machines.Count} 个站台，{Engine.DeviceMachines.Count} 台设备）。");
     }
 
     public async Task StopAsync()
     {
         await Engine.StopAsync().ConfigureAwait(false);
 
-        if (_server is null)
+        if (_servers.Count == 0)
         {
             return;
         }
 
-        await _server.StopAsync().ConfigureAwait(false);
-        await _server.DisposeAsync().ConfigureAwait(false);
-        _server = null;
+        foreach (IProtocolServer server in _servers)
+        {
+            await server.StopAsync().ConfigureAwait(false);
+            await server.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _servers.Clear();
         Log?.Invoke("服务已停止。");
+    }
+
+    private async Task StartModbusAsync(CancellationToken cancellationToken)
+    {
+        List<ModbusEndpointOptions> endpoints = BuildEndpoints();
+        if (endpoints.Count == 0)
+        {
+            return;
+        }
+
+        var server = new ModbusTcpServer(
+            endpoints,
+            new ModbusServerOptions
+            {
+                MaxConnectionsPerIp = _config.Server.MaxConnectionsPerIp,
+                RecordRawFrames = _config.Server.RecordRawFrames,
+            },
+            _frameLog,
+            FaultInjector);
+
+        await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        _servers.Add(server);
+    }
+
+    private async Task StartSocketAsync(CancellationToken cancellationToken)
+    {
+        List<SocketDeviceEndpoint> endpoints = BuildSocketEndpoints();
+        if (endpoints.Count == 0)
+        {
+            return;
+        }
+
+        var server = new SocketTcpServer(
+            endpoints,
+            new SocketServerOptions
+            {
+                MaxConnectionsPerIp = _config.Server.MaxConnectionsPerIp,
+                RecordRawFrames = _config.Server.RecordRawFrames,
+            },
+            _frameLog);
+
+        await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        _servers.Add(server);
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
@@ -136,6 +195,11 @@ public sealed class SimulatorHost : IAsyncDisposable
     public void ResetAll()
     {
         foreach (ConveyorStationMachine machine in Engine.Machines)
+        {
+            Engine.Enqueue(machine.Reset);
+        }
+
+        foreach (IDeviceMachine machine in Engine.DeviceMachines)
         {
             Engine.Enqueue(machine.Reset);
         }
@@ -158,6 +222,19 @@ public sealed class SimulatorHost : IAsyncDisposable
             if (!deviceConfig.Enabled)
             {
                 Log?.Invoke($"设备 {deviceConfig.Id} 已禁用，跳过。");
+                continue;
+            }
+
+            if (string.Equals(deviceConfig.Protocol, "Socket", StringComparison.OrdinalIgnoreCase))
+            {
+                SrmDeviceRuntime srmRuntime = SrmDeviceRuntime.Create(deviceConfig);
+                var machine = new SrmMachine(srmRuntime);
+
+                machine.StateChanged += (_, snapshot) => Log?.Invoke(
+                    $"[{snapshot.DeviceId}] {snapshot.LastEvent}");
+
+                Engine.AddDeviceMachine(machine);
+                _srmDevices.Add(srmRuntime);
                 continue;
             }
 
@@ -261,6 +338,28 @@ public sealed class SimulatorHost : IAsyncDisposable
         }
 
         return null;
+    }
+
+    private List<SocketDeviceEndpoint> BuildSocketEndpoints()
+    {
+        List<SocketDeviceEndpoint> endpoints = [];
+
+        foreach (SrmDeviceRuntime device in _srmDevices)
+        {
+            if (!IPAddress.TryParse(device.Config.Ip, out IPAddress? address) || address is null)
+            {
+                throw new InvalidDataException($"设备 {device.DeviceId} 的 ip \"{device.Config.Ip}\" 不是合法 IP。");
+            }
+
+            endpoints.Add(new SocketDeviceEndpoint(
+                address,
+                device.Ports.Command,
+                device.Ports.Status,
+                device.Ports.Alarm,
+                device));
+        }
+
+        return endpoints;
     }
 
     private List<ModbusEndpointOptions> BuildEndpoints()

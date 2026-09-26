@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\PlcSimulator.Core\PlcSimulator.Core.csproj" />
     <ProjectReference Include="..\PlcSimulator.Protocol.Modbus\PlcSimulator.Protocol.Modbus.csproj" />
+    <ProjectReference Include="..\PlcSimulator.Protocol.Socket\PlcSimulator.Protocol.Socket.csproj" />
     <ProjectReference Include="..\PlcSimulator.Devices\PlcSimulator.Devices.csproj" />
     <ProjectReference Include="..\PlcSimulator.Hosting\PlcSimulator.Hosting.csproj" />
   </ItemGroup>

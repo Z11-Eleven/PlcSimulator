@@ -91,4 +91,56 @@ internal static class TestConfigFactory
             Devices = [device],
         };
     }
+
+    /// <summary>
+    /// 构造一份只含一台堆垛机的内存配置。三个端口由调用方各取一个空闲值，
+    /// 避免测试之间以及与其他测试进程相互冲突。
+    /// <para>
+    /// 注意 <c>Server.Listen</c> 是空的：堆垛机的端口来自设备自己的 socketPorts，
+    /// 这正是「只跑堆垛机的配置不该因为 server.listen 为空而起不来」的那条路径。
+    /// </para>
+    /// </summary>
+    public static SimulatorConfig BuildSrm(
+        int commandPort,
+        int statusPort,
+        int alarmPort,
+        int travelDelayMs = 100,
+        int actionDelayMs = 100,
+        int jitterMs = 0)
+    {
+        var device = new DeviceConfig
+        {
+            Id = "SC01",
+            Name = "高温SC01",
+            Ip = "127.0.0.1",
+            Protocol = "Socket",
+            ProtocolType = "SRM",
+            ProtocolTypeRaw = "Socket_NTI",
+            DeviceType = "Srm",
+            Belong = "1",
+            SocketPorts = new SocketPortsConfig
+            {
+                Command = commandPort,
+                Status = statusPort,
+                Alarm = alarmPort,
+            },
+            Srm = new SrmOptionsConfig
+            {
+                ForkType = "3;3",
+                ForkCount = 2,
+                TravelDelayMs = travelDelayMs,
+                ActionDelayMs = actionDelayMs,
+                JitterMs = jitterMs,
+                StationPoints = { ["1271"] = 2, ["1273"] = 3 },
+                PickStations = ["1271"],
+                PutStations = ["1273"],
+            },
+        };
+
+        return new SimulatorConfig
+        {
+            Server = new ServerConfig { Listen = [] },
+            Devices = [device],
+        };
+    }
 }

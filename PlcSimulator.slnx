@@ -13,4 +13,5 @@
   <Project Path="PlcSimulator.Hosting/PlcSimulator.Hosting.csproj" />
   <Project Path="PlcSimulator.Import/PlcSimulator.Import.csproj" />
   <Project Path="PlcSimulator.Protocol.Modbus/PlcSimulator.Protocol.Modbus.csproj" />
+  <Project Path="PlcSimulator.Protocol.Socket/PlcSimulator.Protocol.Socket.csproj" />
 </Solution>

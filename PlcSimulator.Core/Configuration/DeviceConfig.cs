@@ -34,6 +34,12 @@ public sealed class DeviceConfig
     /// <summary>产线号，对应数据库 belong。</summary>
     public string Belong { get; set; } = string.Empty;
 
+    /// <summary>Socket 传输的三端口与线长；<c>Protocol = "Socket"</c> 时必填。</summary>
+    public SocketPortsConfig? SocketPorts { get; set; }
+
+    /// <summary>堆垛机专项参数；<c>Protocol = "Socket"</c> 时必填。</summary>
+    public SrmOptionsConfig? Srm { get; set; }
+
     public List<RegisterBlockConfig> Blocks { get; set; } = [];
 
     public List<StationConfig> Stations { get; set; } = [];

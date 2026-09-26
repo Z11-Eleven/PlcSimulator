@@ -15,6 +15,8 @@ public sealed class SimulationEngine : IAsyncDisposable
 
     private readonly List<ConveyorStationMachine> _machines = [];
 
+    private readonly List<IDeviceMachine> _deviceMachines = [];
+
     /// <summary>站台号 → 状态机。别名站台号也在这张表里，指向同一个物理站台的状态机。</summary>
     private readonly Dictionary<string, ConveyorStationMachine> _byStationNo = new(StringComparer.Ordinal);
 
@@ -32,6 +34,9 @@ public sealed class SimulationEngine : IAsyncDisposable
 
     public IReadOnlyList<ConveyorStationMachine> Machines => _machines;
 
+    /// <summary>设备级状态机（堆垛机这类整机设备）。与站台分开推进，互不影响。</summary>
+    public IReadOnlyList<IDeviceMachine> DeviceMachines => _deviceMachines;
+
     public TimeSpan TickInterval => _tick;
 
     public bool IsRunning => _cts is not null;
@@ -45,6 +50,17 @@ public sealed class SimulationEngine : IAsyncDisposable
     {
         machine.StateChanged += (_, snapshot) => StationChanged?.Invoke(this, snapshot);
         _machines.Add(machine);
+    }
+
+    /// <summary>
+    /// 登记一台设备级状态机。它不参与站台拓扑，只被 tick 推进。
+    /// 状态变化的对外通知由调用方挂在具体类型上——站台与设备的快照形状不同，
+    /// 塞进同一个事件只会让订阅方做类型判断。
+    /// </summary>
+    public void AddDeviceMachine(IDeviceMachine machine)
+    {
+        ArgumentNullException.ThrowIfNull(machine);
+        _deviceMachines.Add(machine);
     }
 
     /// <summary>
@@ -144,6 +160,11 @@ public sealed class SimulationEngine : IAsyncDisposable
         {
             machine.Tick(_tick);
         }
+
+        foreach (IDeviceMachine machine in _deviceMachines)
+        {
+            machine.Tick(_tick);
+        }
     }
 
     public ConveyorStationMachine? Find(string stationNo)
@@ -201,6 +222,20 @@ public sealed class SimulationEngine : IAsyncDisposable
                     {
                         machine.MarkFaulted($"推进异常：{ex.Message}");
                         Log?.Invoke($"站台 {machine.Station.StationNo} 推进异常，已置为故障：{ex.Message}");
+                    }
+                }
+
+                foreach (IDeviceMachine machine in _deviceMachines)
+                {
+                    // 与站台同样的逐台隔离：设备推进异常只把它标成故障。
+                    try
+                    {
+                        machine.Tick(_tick);
+                    }
+                    catch (Exception ex)
+                    {
+                        machine.MarkFaulted($"推进异常：{ex.Message}");
+                        Log?.Invoke($"设备 {machine.DeviceId} 推进异常，已置为故障：{ex.Message}");
                     }
                 }
             }

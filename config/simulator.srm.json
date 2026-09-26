@@ -1,0 +1,82 @@
+{
+  // 潜江太蓝 PLC 模拟器配置 —— 堆垛机（NTI 协议 + Socket 传输）
+  // 数据来源：数据库 qj_tl.wcs_equipmentinfo 中 equipmentnum = 'SC01' 的三行，
+  // 分别是 rport 2000 / 4000 / 6000 —— 同一台堆垛机的三个端口，不是三台设备。
+  //
+  // 本期先跑通这一台。要多台时逐台复制：把 ip 改成 127.0.0.1 / 127.0.0.2 …，
+  // 并同步改数据库里的 RIPADDR；八台都用 127.0.0.1 会撞端口，
+  // `check` 命令会在启动前就报出来。
+  "version": 1,
+
+  "server": {
+    // 堆垛机的端口来自每台设备的 socketPorts，与 Modbus 的 server.listen 无关。
+    // 本配置只跑堆垛机，所以这里留空。
+    "listen": [],
+    "maxConnectionsPerIp": 8,
+    "recordRawFrames": true
+  },
+
+  "byteOrder": {
+    // Socket 链路上没有任何字节序变换：WCS 把收到的字节直接交给 BindScInfoNTI 解析，
+    // 发出的指令帧也是逐字节照搬。这里不需要任何策略。
+    "policies": {}
+  },
+
+  "faultInjection": {
+    "enabled": false,
+    "rules": []
+  },
+
+  "devices": [
+    {
+      "id": "SC01",
+      "name": "高温SC01", // 数据库 field3
+      "enabled": true,
+      "ip": "127.0.0.1", // 数据库 RIPADDR
+      "protocol": "Socket",
+      "protocolType": "SRM", // 数据库原值是 Socket_NTI，两个都认
+      "protocolTypeRaw": "Socket_NTI",
+      "deviceType": "Srm",
+      "belong": "1", // 数据库 field2
+
+      "socketPorts": {
+        "command": 2000, // 收 26 字节指令帧，只收不回
+        "status": 4000, // 收到 0xFF 回状态帧
+        "alarm": 6000, // 收到 0xFF 回报警位图
+        // 真机的实际线长未确证（WCS 的解析器只读到偏移 22，所以 ≥23 即可）。
+        // 若联调时对端在等更长的帧，改这里即可，不必改代码。
+        "statusFrameLength": 74,
+        "alarmFrameLength": 100
+      },
+
+      "srm": {
+        "forkType": "3;3", // 数据库 forktype
+        "forkCount": 2, // 双货叉
+        "travelDelayMs": 1000, // 行走/定位耗时
+        "actionDelayMs": 2000, // 取货/放货动作耗时
+        "jitterMs": 200,
+
+        // 数据库 stationpoint = "1271,2;1273,3;1073,4;1075,5;"
+        "stationPoints": {
+          "1271": 2,
+          "1273": 3,
+          "1073": 4,
+          "1075": 5
+        },
+        "pickStations": ["1271", "1073"], // 数据库 pickstation
+        "putStations": ["1273", "1075"], // 数据库 putstation
+
+        "avoidancePoint": { "actionPoint": 5, "aisle": 1 },
+        "initialPoint": { "actionPoint": 2, "aisle": 1 },
+
+        // 数据库 field4 / field5 原值，先原样留档，不参与判定。
+        "nearFarStationsRaw": "5113,5115,5045,5047;4014,4016,4119,4121",
+        "avoidanceRaw": "2;1;1;1;5047;4016",
+
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      }
+    }
+  ]
+}
