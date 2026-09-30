@@ -49,7 +49,7 @@ internal sealed class MainForm : Form
     private bool _busy;
 
     /// <summary>
-    /// <paramref name="configPaths"/> 为空时把上次打开的几份都挂上；给了就只挂这几份。
+    /// <paramref name="configPaths"/> 为空时把上次打开的几份加载到总览；给了就只加载这几份。
     /// </summary>
     public MainForm(IReadOnlyList<string> configPaths)
     {
@@ -185,12 +185,11 @@ internal sealed class MainForm : Form
 
         RebuildOverview();
 
-        if (_configs.Count > 0)
+        if (commandLinePaths.Count > 0 && _configs.Count > 0)
         {
-            // 命令行明确点名的都开出来；从设置恢复的只开第一份，
-            // 免得攒了一堆配置的人每次启动被弹一屏窗口。
-            _pendingPresent.AddRange(
-                commandLinePaths.Count > 0 ? _configs : [_configs[0]]);
+            // 命令行明确指定配置时按请求打开对应子窗口；从设置恢复的配置只加载到总览，
+            // 由用户双击后再打开子窗口。
+            _pendingPresent.AddRange(_configs);
         }
 
         SetStatus(_configs.Count switch
