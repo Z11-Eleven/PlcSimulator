@@ -61,7 +61,7 @@ public static class SrmLayout
     /// 可接受的对接协议别名。数据库 wcs_equipmentinfo.protocoltype 里的原值是 <c>Socket_NTI</c>，
     /// 配置里也允许写简短的 <c>SRM</c>。
     /// </summary>
-    public static IReadOnlyList<string> ProtocolTypeAliases { get; } = ["SRM", "Socket_NTI"];
+    public static IReadOnlyList<string> ProtocolTypeAliases { get; } = ["SRM", "Socket_NTI", "S7_NTI", "NTI_S7"];
 
     // ---- 字段表 ----
 

@@ -150,6 +150,7 @@ public sealed class FaultInjectionEndToEndTests
             using var client = new MiniWcsClient("127.0.0.1", port);
 
             client.WriteSingleRegister(0, 1234);
+            client.WriteSingleRegister(3, 1006);   // to @ 字节偏移 6：送到 1006，好让 1005 保持空闲
 
             ConveyorStationMachine machine = host.Engine.Find("1004")!;
             await WaitUntilAsync(() => machine.State == StationState.Done, "站台未完成动作");

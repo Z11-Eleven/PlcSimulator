@@ -259,8 +259,10 @@ public class ManualModeTests
         Line line = CreateLine();
         ConveyorStationMachine machine = line.Machine("1001");
 
-        // 无目标的任务：动作完成后直接把货视为离场并置心跳，停在待清零
+        // 给 1001 一个任务把货送到 1002：货送走后本站置心跳，停在待清零
+        machine.SetLoaded(true);
         StationFixtures.WcsWriteU16(line.Station("1001"), 0, 9001);
+        StationFixtures.WcsWriteU16(line.Station("1001"), 6, 1002);
         AdvanceUntil(line.Engine, () => machine.State == StationState.Done, "未进入待清零");
 
         machine.SetManual(true);

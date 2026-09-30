@@ -13,7 +13,9 @@ public sealed record ModbusDeviceBinding(
     byte SlaveId,
     IRegisterSpace Space,
     /// <summary>把寄存器地址翻译成站台与字段，仅用于日志与诊断。</summary>
-    Func<ushort, AddressHint?>? AddressDescriber = null);
+    Func<ushort, AddressHint?>? AddressDescriber = null,
+    /// <summary>成功写入寄存器后通知宿主；业务层自身的数据区写入不会触发。</summary>
+    Action<ushort, byte[]>? RegistersWritten = null);
 
 /// <summary>
 /// 把一个监听端点映射到它承载的设备。因为 WCS 把端口硬编码为 502，

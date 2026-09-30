@@ -3,7 +3,7 @@ using System.Net;
 namespace PlcSimulator.Core.Protocol;
 
 /// <summary>
-/// 传输无关的协议服务端抽象。Modbus 与（未来的）S7 都实现它，
+/// 传输无关的协议服务端抽象。Modbus、Socket 与 S7 都实现它，
 /// 宿主按配置的 protocol 字段实例化，互不影响。
 /// </summary>
 public interface IProtocolServer : IAsyncDisposable

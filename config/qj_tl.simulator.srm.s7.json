@@ -1,0 +1,503 @@
+{
+  "version": 1,
+  "server": {
+    "listen": [],
+    "defaultSlaveId": 1,
+    "acceptAnySlaveId": true,
+    "maxConnectionsPerIp": 8,
+    "recordRawFrames": true
+  },
+  "byteOrder": {
+    "policies": {}
+  },
+  "faultInjection": {
+    "enabled": false,
+    "rules": []
+  },
+  "devices": [
+    {
+      "id": "SC01",
+      "name": "\u9AD8\u6E29SC01",
+      "enabled": true,
+      "ip": "127.0.0.10",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "S7",
+      "protocolTypeRaw": "NTI_S7",
+      "deviceType": "Srm",
+      "protocolType": "SRM",
+      "readByteOrderPolicy": null,
+      "singleFieldWriteByteOrderPolicy": null,
+      "pollHintMs": 0,
+      "belong": "1",
+      "socketPorts": null,
+      "s7": {
+        "port": 102,
+        "maxPduLength": 960,
+        "command": {
+          "dbNumber": 100,
+          "byteOffset": 0
+        },
+        "status": {
+          "dbNumber": 101,
+          "byteOffset": 0
+        },
+        "alarm": {
+          "dbNumber": 70,
+          "byteOffset": 0
+        },
+        "statusLength": 26,
+        "commandPayloadOffset": 0,
+        "commandLength": 23,
+        "alarmLength": 100
+      },
+      "srm": {
+        "forkType": "1;1",
+        "forkCount": 1,
+        "travelDelayMs": 1000,
+        "actionDelayMs": 3000,
+        "jitterMs": 200,
+        "stationPoints": {
+          "1271": 2,
+          "1273": 3,
+          "1073": 4,
+          "1075": 5
+        },
+        "pickStations": [
+          "1271",
+          "1073"
+        ],
+        "putStations": [
+          "1273",
+          "1075"
+        ],
+        "avoidancePoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "nearFarStationsRaw": "5113,5115,5045,5047;4014,4016,4119,4121",
+        "avoidanceRaw": "2;1;1;1;5047;4016",
+        "initialPoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      },
+      "blocks": [],
+      "stations": []
+    },
+    {
+      "id": "SC02",
+      "name": "\u9AD8\u6E29SC02",
+      "enabled": true,
+      "ip": "127.0.0.11",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "S7",
+      "protocolTypeRaw": "NTI_S7",
+      "deviceType": "Srm",
+      "protocolType": "SRM",
+      "readByteOrderPolicy": null,
+      "singleFieldWriteByteOrderPolicy": null,
+      "pollHintMs": 0,
+      "belong": "2",
+      "socketPorts": null,
+      "s7": {
+        "port": 102,
+        "maxPduLength": 960,
+        "command": {
+          "dbNumber": 100,
+          "byteOffset": 0
+        },
+        "status": {
+          "dbNumber": 101,
+          "byteOffset": 0
+        },
+        "alarm": {
+          "dbNumber": 70,
+          "byteOffset": 0
+        },
+        "statusLength": 26,
+        "commandPayloadOffset": 0,
+        "commandLength": 23,
+        "alarmLength": 100
+      },
+      "srm": {
+        "forkType": "1;1",
+        "forkCount": 1,
+        "travelDelayMs": 1000,
+        "actionDelayMs": 3000,
+        "jitterMs": 200,
+        "stationPoints": {
+          "1068": 2,
+          "1278": 3
+        },
+        "pickStations": [
+          "1068"
+        ],
+        "putStations": [
+          "1278"
+        ],
+        "avoidancePoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "nearFarStationsRaw": "5101,5103,5057,5059;4001,4003,4132,4134",
+        "avoidanceRaw": "2;1;1;1;5059;4003",
+        "initialPoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      },
+      "blocks": [],
+      "stations": []
+    },
+    {
+      "id": "SC03",
+      "name": "\u9AD8\u6E29SC03",
+      "enabled": true,
+      "ip": "127.0.0.12",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "S7",
+      "protocolTypeRaw": "NTI_S7",
+      "deviceType": "Srm",
+      "protocolType": "SRM",
+      "readByteOrderPolicy": null,
+      "singleFieldWriteByteOrderPolicy": null,
+      "pollHintMs": 0,
+      "belong": "3",
+      "socketPorts": null,
+      "s7": {
+        "port": 102,
+        "maxPduLength": 960,
+        "command": {
+          "dbNumber": 100,
+          "byteOffset": 0
+        },
+        "status": {
+          "dbNumber": 101,
+          "byteOffset": 0
+        },
+        "alarm": {
+          "dbNumber": 70,
+          "byteOffset": 0
+        },
+        "statusLength": 26,
+        "commandPayloadOffset": 0,
+        "commandLength": 23,
+        "alarmLength": 100
+      },
+      "srm": {
+        "forkType": "1;1",
+        "forkCount": 1,
+        "travelDelayMs": 1000,
+        "actionDelayMs": 3000,
+        "jitterMs": 200,
+        "stationPoints": {
+          "1447": 2,
+          "1609": 3
+        },
+        "pickStations": [
+          "1447"
+        ],
+        "putStations": [
+          "1609"
+        ],
+        "avoidancePoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "nearFarStationsRaw": "6020,6022,6126,6124;7003,7001,7128,7130,7227,7229",
+        "avoidanceRaw": "2;1;1;3;6020;7003",
+        "initialPoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      },
+      "blocks": [],
+      "stations": []
+    },
+    {
+      "id": "SC04",
+      "name": "\u5E38\u6E29SC04",
+      "enabled": true,
+      "ip": "127.0.0.13",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "S7",
+      "protocolTypeRaw": "NTI_S7",
+      "deviceType": "Srm",
+      "protocolType": "SRM",
+      "readByteOrderPolicy": null,
+      "singleFieldWriteByteOrderPolicy": null,
+      "pollHintMs": 0,
+      "belong": "4",
+      "socketPorts": null,
+      "s7": {
+        "port": 102,
+        "maxPduLength": 960,
+        "command": {
+          "dbNumber": 100,
+          "byteOffset": 0
+        },
+        "status": {
+          "dbNumber": 101,
+          "byteOffset": 0
+        },
+        "alarm": {
+          "dbNumber": 70,
+          "byteOffset": 0
+        },
+        "statusLength": 26,
+        "commandPayloadOffset": 0,
+        "commandLength": 23,
+        "alarmLength": 100
+      },
+      "srm": {
+        "forkType": "1;1",
+        "forkCount": 1,
+        "travelDelayMs": 1000,
+        "actionDelayMs": 3000,
+        "jitterMs": 200,
+        "stationPoints": {
+          "1450": 2,
+          "1452": 3,
+          "1621": 4
+        },
+        "pickStations": [
+          "1621",
+          "1450"
+        ],
+        "putStations": [
+          "1452"
+        ],
+        "avoidancePoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "nearFarStationsRaw": "6008,6010,6117,6115;7015,7013,7115,7117,7215,7217",
+        "avoidanceRaw": "2;1;1;3;6008;7015",
+        "initialPoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      },
+      "blocks": [],
+      "stations": []
+    },
+    {
+      "id": "SC05",
+      "name": "\u5E38\u6E29SC05",
+      "enabled": true,
+      "ip": "127.0.0.14",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "S7",
+      "protocolTypeRaw": "NTI_S7",
+      "deviceType": "Srm",
+      "protocolType": "SRM",
+      "readByteOrderPolicy": null,
+      "singleFieldWriteByteOrderPolicy": null,
+      "pollHintMs": 0,
+      "belong": "5",
+      "socketPorts": null,
+      "s7": {
+        "port": 102,
+        "maxPduLength": 960,
+        "command": {
+          "dbNumber": 100,
+          "byteOffset": 0
+        },
+        "status": {
+          "dbNumber": 101,
+          "byteOffset": 0
+        },
+        "alarm": {
+          "dbNumber": 70,
+          "byteOffset": 0
+        },
+        "statusLength": 26,
+        "commandPayloadOffset": 0,
+        "commandLength": 23,
+        "alarmLength": 100
+      },
+      "srm": {
+        "forkType": "1;1",
+        "forkCount": 1,
+        "travelDelayMs": 1000,
+        "actionDelayMs": 3000,
+        "jitterMs": 200,
+        "stationPoints": {
+          "1455": 2,
+          "1459": 3,
+          "1627": 4
+        },
+        "pickStations": [
+          "1627",
+          "1459"
+        ],
+        "putStations": [
+          "1455"
+        ],
+        "avoidancePoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "nearFarStationsRaw": "6001,6003,6113,6111;7303,7301,7558,7560,7660,7662",
+        "avoidanceRaw": "2;1;1;3;6001;7303",
+        "initialPoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      },
+      "blocks": [],
+      "stations": []
+    },
+    {
+      "id": "SC06",
+      "name": "\u5E38\u6E29SC06",
+      "enabled": true,
+      "ip": "127.0.0.15",
+      "port": 502,
+      "slaveId": 1,
+      "protocol": "S7",
+      "protocolTypeRaw": "NTI_S7",
+      "deviceType": "Srm",
+      "protocolType": "SRM",
+      "readByteOrderPolicy": null,
+      "singleFieldWriteByteOrderPolicy": null,
+      "pollHintMs": 0,
+      "belong": "6",
+      "socketPorts": null,
+      "s7": {
+        "port": 102,
+        "maxPduLength": 960,
+        "command": {
+          "dbNumber": 100,
+          "byteOffset": 0
+        },
+        "status": {
+          "dbNumber": 101,
+          "byteOffset": 0
+        },
+        "alarm": {
+          "dbNumber": 70,
+          "byteOffset": 0
+        },
+        "statusLength": 26,
+        "commandPayloadOffset": 0,
+        "commandLength": 23,
+        "alarmLength": 100
+      },
+      "srm": {
+        "forkType": "1;1",
+        "forkCount": 1,
+        "travelDelayMs": 1000,
+        "actionDelayMs": 3000,
+        "jitterMs": 200,
+        "stationPoints": {
+          "1461": 2,
+          "1465": 3,
+          "1634": 4
+        },
+        "pickStations": [
+          "1634",
+          "1465"
+        ],
+        "putStations": [
+          "1461"
+        ],
+        "avoidancePoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "nearFarStationsRaw": "F0010010011;8188,8190,8207,8205,8463,8465,8503,8501",
+        "avoidanceRaw": "2;1;3;1;F0010010011;8188",
+        "initialPoint": {
+          "actionPoint": 0,
+          "aisle": 1,
+          "row": 0,
+          "column": 0,
+          "cell": 0,
+          "level": 0,
+          "depth": 1
+        },
+        "auto": true,
+        "fault": false,
+        "fireAlarm": false
+      },
+      "blocks": [],
+      "stations": []
+    }
+  ]
+}

@@ -100,7 +100,7 @@ public static class ConfigLoader
 
             // Socket 设备是另一套模型：没有站号、没有寄存器块，端口来自 socketPorts 而不是 port，
             // 因此走单独的校验分支，不落到下面的 Modbus 检查上。
-            if (IsSocketDevice(device))
+            if (IsSocketDevice(device) || IsS7Device(device))
             {
                 ValidateSrmDevice(device, label, errors, warnings, endpoints);
                 continue;
@@ -166,6 +166,9 @@ public static class ConfigLoader
     private static bool IsSocketDevice(DeviceConfig device)
         => string.Equals(device.Protocol, "Socket", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsS7Device(DeviceConfig device)
+        => string.Equals(device.Protocol, "S7", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// 堆垛机（Socket 传输）的专项校验。它不查站台与寄存器块，
     /// 查的是三个端口、协议别名与状态帧容量。
@@ -177,6 +180,13 @@ public static class ConfigLoader
         List<string> warnings,
         HashSet<(string Ip, int Port)> endpoints)
     {
+        if (IsS7Device(device))
+        {
+            ValidateS7Device(device, label, errors, endpoints);
+            ValidateSrmOptions(device, label, errors, warnings);
+            return;
+        }
+
         SocketPortsConfig? ports = device.SocketPorts;
         if (ports is null)
         {
@@ -231,6 +241,71 @@ public static class ConfigLoader
             errors.Add($"设备 {label} 的 alarmFrameLength 必须为正数。");
         }
 
+        ValidateSrmOptions(device, label, errors, warnings);
+    }
+
+    private static void ValidateS7Device(DeviceConfig device, string label, List<string> errors,
+        HashSet<(string Ip, int Port)> endpoints)
+    {
+        S7OptionsConfig? s7 = device.S7;
+        if (s7 is null)
+        {
+            errors.Add($"设备 {label} 的 protocol 是 S7，但缺少 s7 配置。");
+            return;
+        }
+
+        if (s7.Port is < 1 or > 65535)
+        {
+            errors.Add($"设备 {label} 的 s7.port 超出端口范围。");
+        }
+        if (!endpoints.Add((device.Ip, s7.Port)))
+        {
+            errors.Add($"S7 端点重复：{device.Ip}:{s7.Port}（设备 {label}）。多台堆垛机请使用不同 IP 或端口。");
+        }
+        if (s7.MaxPduLength is < 240 or > 960)
+        {
+            errors.Add($"设备 {label} 的 s7.maxPduLength 必须为 240～960。");
+        }
+        if (s7.CommandPayloadOffset is not (0 or 2))
+        {
+            errors.Add($"设备 {label} 的 s7.commandPayloadOffset 只能为 0 或 2。");
+        }
+        if (s7.StatusLength is < SrmLayout.MinStatusFrameLength or > SrmLayout.StatusAreaLength
+            || s7.AlarmLength is < 1 or > SrmLayout.AlarmAreaLength)
+        {
+            errors.Add($"设备 {label} 的 s7.statusLength 必须为 23～171，alarmLength 必须为 1～100。");
+        }
+
+        (string Name, S7DbRegionConfig? Region, int Length)[] regions =
+        [
+            ("command", s7.Command, s7.CommandLength),
+            ("status", s7.Status, s7.StatusLength),
+            ("alarm", s7.Alarm, s7.AlarmLength),
+        ];
+        for (int i = 0; i < regions.Length; i++)
+        {
+            var current = regions[i];
+            if (current.Region is null || current.Region.DbNumber is < 1 or > 65535
+                || current.Region.ByteOffset < 0 || current.Region.ByteOffset > 65536 - current.Length)
+            {
+                errors.Add($"设备 {label} 的 s7.{current.Name} DB 编号或字节范围无效。");
+                continue;
+            }
+            for (int j = 0; j < i; j++)
+            {
+                var previous = regions[j];
+                if (previous.Region is not null && current.Region.DbNumber == previous.Region.DbNumber
+                    && current.Region.ByteOffset < (long)previous.Region.ByteOffset + previous.Length
+                    && previous.Region.ByteOffset < (long)current.Region.ByteOffset + current.Length)
+                {
+                    errors.Add($"设备 {label} 的 s7.{previous.Name} 与 s7.{current.Name} 在同一个 DB 中重叠。");
+                }
+            }
+        }
+    }
+
+    private static void ValidateSrmOptions(DeviceConfig device, string label, List<string> errors, List<string> warnings)
+    {
         if (!SrmLayout.ProtocolTypeAliases.Contains(device.ProtocolType, StringComparer.OrdinalIgnoreCase))
         {
             errors.Add(
@@ -241,7 +316,7 @@ public static class ConfigLoader
         SrmOptionsConfig? srm = device.Srm;
         if (srm is null)
         {
-            errors.Add($"设备 {label} 的 protocol 是 Socket，但缺少 srm 配置。");
+            errors.Add($"设备 {label} 的 protocol 是 {device.Protocol}，但缺少 srm 配置。");
             return;
         }
 

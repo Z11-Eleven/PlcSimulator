@@ -35,6 +35,50 @@ public class ModbusRequestProcessorTests
     }
 
     [Fact]
+    public void WriteRegisters_RejectedRequest_DoesNotNotifyHost()
+    {
+        var space = new DeviceRegisterSpace("notify-test", [new RegisterBlock("g", 0, 16)]);
+        int notifications = 0;
+        var binding = new ModbusDeviceBinding("notify-test", 1, space,
+            RegistersWritten: (_, _) => notifications++);
+        var processor = new ModbusRequestProcessor(new StaticDeviceResolver([binding], false));
+
+        Assert.True(IsException(processor.Process(Write(8, [0, 0]))));
+        Assert.Equal(0, notifications);
+    }
+
+    [Theory]
+    [InlineData(ModbusFunctionCode.WriteSingleRegister)]
+    [InlineData(ModbusFunctionCode.WriteMultipleRegisters)]
+    [InlineData(ModbusFunctionCode.ReadWriteMultipleRegisters)]
+    public void WriteRegisters_Success_NotifiesHostWithWrittenRange(ModbusFunctionCode function)
+    {
+        var space = new DeviceRegisterSpace("notify-test", [new RegisterBlock("g", 0, 16)]);
+        int notifications = 0;
+        ushort writtenAddress = 0;
+        byte[]? writtenData = null;
+        var binding = new ModbusDeviceBinding("notify-test", 1, space,
+            RegistersWritten: (address, payload) =>
+            {
+                notifications++;
+                writtenAddress = address;
+                writtenData = payload;
+            });
+        var processor = new ModbusRequestProcessor(new StaticDeviceResolver([binding], false));
+        var request = function == ModbusFunctionCode.ReadWriteMultipleRegisters
+            ? new ModbusRequest(1, 1, function, 0, 1, 3, 1, [0, 0])
+            : Write(3, [0, 0], function);
+
+        Assert.False(IsException(processor.Process(request)));
+        Assert.Equal(1, notifications);
+        Assert.Equal((ushort)3, writtenAddress);
+        Assert.Equal(new byte[] { 0, 0 }, writtenData);
+        // 状态机自行清零不能发出 WCS 清空通知。
+        space.TryClearRange(0, 16);
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
     public void ReadHoldingRegisters_MappedAddress_ReturnsStoredBytes()
     {
         Fixture fixture = CreateFixture();

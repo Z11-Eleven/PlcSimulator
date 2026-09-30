@@ -10,6 +10,7 @@ using PlcSimulator.Devices.Srm;
 using PlcSimulator.Devices.Stations;
 using PlcSimulator.Protocol.Modbus;
 using PlcSimulator.Protocol.Socket;
+using PlcSimulator.Protocol.S7;
 
 namespace PlcSimulator.Hosting;
 
@@ -78,14 +79,23 @@ public sealed class SimulatorHost : IAsyncDisposable
             return;
         }
 
-        await StartModbusAsync(cancellationToken).ConfigureAwait(false);
-        await StartSocketAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StartModbusAsync(cancellationToken).ConfigureAwait(false);
+            await StartSocketAsync(cancellationToken).ConfigureAwait(false);
+            await StartS7Async(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await StopAsync().ConfigureAwait(false);
+            throw;
+        }
 
         if (_servers.Count == 0)
         {
             // 两类服务端都起不来才是真错误：只跑堆垛机的配置里 server.listen 本就是空的。
             throw new InvalidOperationException(
-                "没有任何启用的监听端点：请检查 server.listen 配置，以及 Socket 设备的 socketPorts。");
+                "没有任何启用的监听端点：请检查 server.listen、Socket 的 socketPorts 或 S7 的 s7 配置。");
         }
 
         foreach (IProtocolServer server in _servers)
@@ -107,6 +117,13 @@ public sealed class SimulatorHost : IAsyncDisposable
 
         foreach (SrmDeviceRuntime device in _srmDevices)
         {
+            if (device.Config.S7 is S7OptionsConfig s7 && device.Config.Protocol.Equals("S7", StringComparison.OrdinalIgnoreCase))
+            {
+                Log?.Invoke($"设备 {device.DeviceId}（{device.Name}）S7 {device.Config.Ip}:{s7.Port}，"
+                    + $"指令 DB{s7.Command.DbNumber}.{s7.Command.ByteOffset}，"
+                    + $"状态 DB{s7.Status.DbNumber}.{s7.Status.ByteOffset}，报警 DB{s7.Alarm.DbNumber}.{s7.Alarm.ByteOffset}");
+                continue;
+            }
             Log?.Invoke(
                 $"设备 {device.DeviceId}（{device.Name}）对接协议 {device.Config.ProtocolType}，"
                 + $"货叉 {device.Options.ForkCount} 个，"
@@ -157,7 +174,15 @@ public sealed class SimulatorHost : IAsyncDisposable
             _frameLog,
             FaultInjector);
 
-        await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await server.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         _servers.Add(server);
     }
 
@@ -178,11 +203,35 @@ public sealed class SimulatorHost : IAsyncDisposable
             },
             _frameLog);
 
-        await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await server.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         _servers.Add(server);
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+
+    private async Task StartS7Async(CancellationToken cancellationToken)
+    {
+        var endpoints = _srmDevices
+            .Where(d => d.Config.Protocol.Equals("S7", StringComparison.OrdinalIgnoreCase))
+            .Select(d => new S7DeviceEndpoint(IPAddress.Parse(d.Config.Ip), d.Config.S7!.Port, d, d.Config.S7.MaxPduLength))
+            .ToArray();
+        if (endpoints.Length == 0)
+        {
+            return;
+        }
+        var server = new S7TcpServer(endpoints, _config.Server.MaxConnectionsPerIp,
+            _config.Server.RecordRawFrames, _frameLog);
+        await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        _servers.Add(server);
+    }
 
     /// <summary>
     /// 把所有站台复位成配置初值。
@@ -225,7 +274,8 @@ public sealed class SimulatorHost : IAsyncDisposable
                 continue;
             }
 
-            if (string.Equals(deviceConfig.Protocol, "Socket", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(deviceConfig.Protocol, "Socket", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(deviceConfig.Protocol, "S7", StringComparison.OrdinalIgnoreCase))
             {
                 SrmDeviceRuntime srmRuntime = SrmDeviceRuntime.Create(deviceConfig);
                 var machine = new SrmMachine(srmRuntime);
@@ -240,7 +290,6 @@ public sealed class SimulatorHost : IAsyncDisposable
 
             if (!string.Equals(deviceConfig.Protocol, "Modbus", StringComparison.OrdinalIgnoreCase))
             {
-                // S7 为预留扩展位，本期不实现。
                 Log?.Invoke($"设备 {deviceConfig.Id} 的协议 {deviceConfig.Protocol} 本期未实现，跳过。");
                 continue;
             }
@@ -346,6 +395,10 @@ public sealed class SimulatorHost : IAsyncDisposable
 
         foreach (SrmDeviceRuntime device in _srmDevices)
         {
+            if (!device.Config.Protocol.Equals("Socket", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             if (!IPAddress.TryParse(device.Config.Ip, out IPAddress? address) || address is null)
             {
                 throw new InvalidDataException($"设备 {device.DeviceId} 的 ip \"{device.Config.Ip}\" 不是合法 IP。");
@@ -360,6 +413,36 @@ public sealed class SimulatorHost : IAsyncDisposable
         }
 
         return endpoints;
+    }
+
+    /// <summary>WCS 显式写零任务号表示清空站台，不能靠当前寄存器为零判断：离站也会自行清零。</summary>
+    private void OnRegistersWritten(DeviceRuntime device, ushort address, byte[] payload)
+    {
+        if (!device.ProtocolTemplate.TryGetWriteField("tasknum", out FieldDescriptor taskField))
+        {
+            return;
+        }
+
+        int byteStart = address * 2;
+        foreach (StationRuntime station in device.PhysicalStations)
+        {
+            int offset = station.ByteOffset + taskField.ByteOffset - byteStart;
+            if (offset < 0 || offset + taskField.SizeInBytes > payload.Length
+                || payload[offset] != 0 || payload[offset + 1] != 0)
+            {
+                continue;
+            }
+
+            // 通信线程只投递操作，状态机及在途缓存由引擎线程统一清除。
+            Engine.Enqueue(() =>
+            {
+                // 若 WCS 随后已下发新任务，不能让排队的清空删除新任务。
+                if (station.ReadIncomingU16("tasknum") == 0)
+                {
+                    Engine.Find(station.StationNo)?.ClearFromWcs();
+                }
+            });
+        }
     }
 
     private List<ModbusEndpointOptions> BuildEndpoints()
@@ -391,7 +474,8 @@ public sealed class SimulatorHost : IAsyncDisposable
                         device.Config.Id,
                         device.Config.SlaveId,
                         device.Space,
-                        address => DescribeAddress(device, address)));
+                        address => DescribeAddress(device, address),
+                        (address, payload) => OnRegistersWritten(device, address, payload)));
                 }
             }
 

@@ -60,6 +60,85 @@ internal static class StationFixtures
     }
 
     /// <summary>
+    /// 造一台带下游站台的状态机：本站 1004、下游 1003，目标写 1003 就能走完
+    /// 「动作 → 离站 → 送达 → 置心跳」的整条闭环。
+    /// <para>
+    /// 不配寻路拓扑，按任务里的目标一步投送；在途时长配成 0，送达是即时的。
+    /// 下游只负责接收，自己不会被推进——本夹具测的是本站的流程，不是货物的实际走位。
+    /// </para>
+    /// </summary>
+    public static (ConveyorStationMachine Machine, StationRuntime Station) CreateMachineWithDownstream(
+        int actionDelayMs = 1000,
+        int jitterMs = 0,
+        int clearTimeoutMs = 0,
+        bool loaded = false,
+        bool auto = true)
+    {
+        var config = new DeviceConfig
+        {
+            Id = "cv-test",
+            Name = "测试输送机",
+            Ip = "127.0.0.1",
+            ProtocolType = NtiProtocol.ProtocolName,
+            Protocol = "Modbus",
+            ReadByteOrderPolicy = "NTI-ConveyorRead",
+            SingleFieldWriteByteOrderPolicy = "SingleFieldWrite",
+            Blocks = [new RegisterBlockConfig { Group = string.Empty, BaseByteOffset = 0, LengthBytes = 256 }],
+            Stations =
+            [
+                new StationConfig
+                {
+                    StationNo = "1004",
+                    Name = "1004",
+                    ByteOffset = 0,
+                    LengthBytes = 30,
+                    Simulation = new SimulationConfig
+                    {
+                        ActionDelayMs = actionDelayMs,
+                        TransferDelayMs = 0,
+                        JitterMs = jitterMs,
+                        ClearTimeoutMs = clearTimeoutMs,
+                        Initial = new InitialValuesConfig { Loaded = loaded, Auto = auto },
+                    },
+                },
+                new StationConfig
+                {
+                    StationNo = "1003",
+                    Name = "1003",
+                    ByteOffset = 30,
+                    LengthBytes = 30,
+                },
+            ],
+        };
+
+        var device = new DeviceRuntime(
+            config,
+            NtiProtocol.Instance,
+            new ByteOrderPolicy { Name = "NTI-ConveyorRead", ExtraPairUnswapRanges = [[12, 28]] },
+            new ByteOrderPolicy { Name = "SingleFieldWrite" });
+
+        StationInitializer.Apply(device);
+
+        StationRuntime upstream = device.Stations.First(static s => s.StationNo == "1004");
+        StationRuntime downstream = device.Stations.First(static s => s.StationNo == "1003");
+
+        ConveyorStationMachine? upstreamMachine = null;
+        ConveyorStationMachine? downstreamMachine = null;
+
+        ConveyorStationMachine? Lookup(string stationNo) => stationNo switch
+        {
+            "1004" => upstreamMachine,
+            "1003" => downstreamMachine,
+            _ => null,
+        };
+
+        upstreamMachine = new ConveyorStationMachine(upstream, randomSeed: 1, stationLookup: Lookup);
+        downstreamMachine = new ConveyorStationMachine(downstream, randomSeed: 1, stationLookup: Lookup);
+
+        return (upstreamMachine, upstream);
+    }
+
+    /// <summary>
     /// 模拟 WCS 写入一个 16 位值。按 2026-09-23 修正后的交换规则，
     /// WCS 写入不再需要高低位转换，这里就是大端直写。
     /// </summary>
@@ -117,12 +196,13 @@ public class ConveyorStationMachineTests
     [Fact]
     public void Tick_AfterActionDelay_RaisesHeartbeatAndEntersDone()
     {
-        StationRuntime station = StationFixtures.CreateStation(actionDelayMs: 1000);
-        var machine = new ConveyorStationMachine(station, randomSeed: 1);
+        (ConveyorStationMachine machine, StationRuntime station) =
+            StationFixtures.CreateMachineWithDownstream(actionDelayMs: 1000);
 
         StationFixtures.WcsWriteU16(station, 0, 1234);
+        StationFixtures.WcsWriteU16(station, 6, 1003);   // 目标写下游站台，货才送得出去
         machine.Tick(Tick);
-        Advance(machine, 1000);
+        Advance(machine, 1050);                          // 动作 1000 ms 走完，再一个 tick 送达
 
         Assert.Equal(StationState.Done, machine.State);
         Assert.Equal(1, StationFixtures.ReadRawU16(station, StationFixtures.HeartbeatByteOffset));
@@ -131,12 +211,13 @@ public class ConveyorStationMachineTests
     [Fact]
     public void Tick_AfterWcsClearsHeartbeat_ReturnsToIdleAndZeroesHeartbeat()
     {
-        StationRuntime station = StationFixtures.CreateStation(actionDelayMs: 1000);
-        var machine = new ConveyorStationMachine(station, randomSeed: 1);
+        (ConveyorStationMachine machine, StationRuntime station) =
+            StationFixtures.CreateMachineWithDownstream(actionDelayMs: 1000);
 
         StationFixtures.WcsWriteU16(station, 0, 1234);
+        StationFixtures.WcsWriteU16(station, 6, 1003);
         machine.Tick(Tick);
-        Advance(machine, 1000);
+        Advance(machine, 1050);
 
         // WCS 读到心跳 == 1 后写清零值 2（按 2026-09-23 修正后的规则，写入不做转换）。
         StationFixtures.WcsWriteU16(station, StationFixtures.HeartbeatByteOffset, 2);
@@ -149,18 +230,19 @@ public class ConveyorStationMachineTests
     [Fact]
     public void Tick_WithUnchangedTaskNumber_DoesNotRetrigger()
     {
-        StationRuntime station = StationFixtures.CreateStation(actionDelayMs: 1000);
-        var machine = new ConveyorStationMachine(station, randomSeed: 1);
+        (ConveyorStationMachine machine, StationRuntime station) =
+            StationFixtures.CreateMachineWithDownstream(actionDelayMs: 1000);
 
         StationFixtures.WcsWriteU16(station, 0, 1234);
+        StationFixtures.WcsWriteU16(station, 6, 1003);
         machine.Tick(Tick);
-        Advance(machine, 1000);
+        Advance(machine, 1050);
 
         StationFixtures.WcsWriteU16(station, StationFixtures.HeartbeatByteOffset, 2);
         machine.Tick(Tick);
         Assert.Equal(StationState.Idle, machine.State);
 
-        // WCS 侧任务号还没清，同一个任务号不能再次触发。
+        // 托盘离站时本站字段已经清空，不会有残留的任务号把它再触发一次。
         Advance(machine, 500);
         Assert.Equal(StationState.Idle, machine.State);
     }
@@ -168,12 +250,13 @@ public class ConveyorStationMachineTests
     [Fact]
     public void Tick_WithNewTaskNumberAfterCompletion_Retriggers()
     {
-        StationRuntime station = StationFixtures.CreateStation(actionDelayMs: 1000);
-        var machine = new ConveyorStationMachine(station, randomSeed: 1);
+        (ConveyorStationMachine machine, StationRuntime station) =
+            StationFixtures.CreateMachineWithDownstream(actionDelayMs: 1000);
 
         StationFixtures.WcsWriteU16(station, 0, 1234);
+        StationFixtures.WcsWriteU16(station, 6, 1003);
         machine.Tick(Tick);
-        Advance(machine, 1000);
+        Advance(machine, 1050);
         StationFixtures.WcsWriteU16(station, StationFixtures.HeartbeatByteOffset, 2);
         machine.Tick(Tick);
 
@@ -186,15 +269,16 @@ public class ConveyorStationMachineTests
     [Fact]
     public void Tick_WithoutWcsClearing_RaisesClearTimeout()
     {
-        StationRuntime station = StationFixtures.CreateStation(actionDelayMs: 1000, clearTimeoutMs: 2000);
-        var machine = new ConveyorStationMachine(station, randomSeed: 1);
+        (ConveyorStationMachine machine, StationRuntime station) =
+            StationFixtures.CreateMachineWithDownstream(actionDelayMs: 1000, clearTimeoutMs: 2000);
 
         bool timedOut = false;
         machine.ClearTimedOut += (_, _) => timedOut = true;
 
         StationFixtures.WcsWriteU16(station, 0, 1234);
+        StationFixtures.WcsWriteU16(station, 6, 1003);
         machine.Tick(Tick);
-        Advance(machine, 1000);
+        Advance(machine, 1050);
         Assert.Equal(StationState.Done, machine.State);
 
         Advance(machine, 2000);

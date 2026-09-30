@@ -167,7 +167,7 @@ public sealed record PathDiagnosticReport
             PathDiagnosticOutcome.SameNode =>
                 "提示：起终点是同一个站台、或同一个物理设备（提升机的两层），运行时货物不会移动。",
             PathDiagnosticOutcome.FromNotInConfig or PathDiagnosticOutcome.ToNotInConfig =>
-                "提示：站台不在仿真范围内时，货物会被视为离场、本站直接完成 —— 不会真的搬过去。",
+                "提示：站台不在仿真范围内时，托盘会留在原地不动、任务信息不丢，等 WCS 把目标改对。",
             _ =>
                 "提示：运行时找不到路径会退回按任务里的目标站台直接投送（一步到位），"
                 + "不经过中间站台。",

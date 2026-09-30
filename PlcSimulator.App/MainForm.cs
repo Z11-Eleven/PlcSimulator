@@ -53,7 +53,7 @@ internal sealed class MainForm : Form
     /// </summary>
     public MainForm(IReadOnlyList<string> configPaths)
     {
-        Text = "潜江太蓝 PLC 模拟器";
+        Text = "PLC 模拟器";
         MinimumSize = new Size(900, 500);
         Size = new Size(1180, 620);
         StartPosition = FormStartPosition.CenterScreen;
@@ -90,12 +90,13 @@ internal sealed class MainForm : Form
     {
         _uiTimer.Stop();
 
-        if (_configs.Exists(static c => c.IsRunning))
+        if (_configs.Count > 0)
         {
             e.Cancel = true;
 
-            // 先显式关掉各个子窗口（它们会把自己的会话停干净），再关自己。
-            // 不依赖「owner 关闭时连带关闭 owned form」与 e.Cancel 的隐晦交互。
+            // 先显式关掉各个子窗口（只是收界面，不停服务），再统一停掉所有引擎——
+            // 子窗口关闭不停服务，停引擎这件事只在这里做一次。不依赖「owner 关闭时
+            // 连带关闭 owned form」与 e.Cancel 的隐晦交互。
             foreach (SimulatorWindowBase window in _windows.Values.ToList())
             {
                 window.Close();
@@ -235,13 +236,6 @@ internal sealed class MainForm : Form
     {
         if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? existing))
         {
-            if (existing.ClosingInProgress)
-            {
-                // 那个时间窗里会话还没摘掉，再开一个会有两个宿主抢同一批端口。
-                SetStatus("这份配置的窗口正在关闭，请稍后再试");
-                return;
-            }
-
             if (existing.WindowState == FormWindowState.Minimized)
             {
                 existing.WindowState = FormWindowState.Normal;
@@ -287,9 +281,11 @@ internal sealed class MainForm : Form
     {
         _windows.Remove(session.Path);
 
-        // 关窗口只是把界面收起来，**不卸载配置**——它还留在总览里，双击就能重新开。
-        // 真想卸载用工具栏的「关闭配置」。
-        SetStatus($"已关闭窗口：{session.DisplayName}（配置仍在列表里，双击可重新打开）");
+        // 关窗口只是把界面收起来，**不卸载配置、也不停服务**——引擎继续在后台跑，
+        // 主窗口里双击那一行就能把窗口再开出来。真想停下用工具栏的「全部停止」。
+        SetStatus(session.IsRunning
+            ? $"已关闭窗口：{session.DisplayName}（引擎仍在后台运行，双击可重新打开）"
+            : $"已关闭窗口：{session.DisplayName}（配置仍在列表里，双击可重新打开）");
     }
 
     // ---- 总览 ----
@@ -472,7 +468,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            // 窗口开着就先关窗口（它会停服务）；没开窗口的直接停。
+            // 窗口开着就先关窗口（只是收界面，不停服务）；停服务统一由下面的 DisposeAsync 做。
             if (_windows.TryGetValue(session.Path, out SimulatorWindowBase? window))
             {
                 window.Close();

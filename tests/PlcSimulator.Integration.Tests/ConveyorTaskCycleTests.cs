@@ -16,6 +16,7 @@ public sealed class ConveyorTaskCycleTests : IAsyncLifetime
     private const int HeartbeatByteOffset = 8;
     private const int HeartbeatRegister = HeartbeatByteOffset / 2;
     private const int TaskNumRegister = 0;
+    private const int ToStationRegister = 3;   // to @ 字节偏移 6
 
     private SimulatorHost _host = null!;
     private int _port;
@@ -38,6 +39,9 @@ public sealed class ConveyorTaskCycleTests : IAsyncLifetime
         ConveyorStationMachine machine = _host.Engine.Find("1004")
             ?? throw new InvalidOperationException("未找到站台 1004 的状态机。");
 
+        // 货送到 1005 就停在那儿；每轮收尾把它从下游收走，好腾出位置接下一轮。
+        ConveyorStationMachine downstream = _host.Engine.Find("1005")!;
+
         using MiniWcsClient client = new("127.0.0.1", _port);
 
         // 默认初值：无货待命
@@ -47,8 +51,9 @@ public sealed class ConveyorTaskCycleTests : IAsyncLifetime
         {
             ushort taskNum = (ushort)(1000 + round);
 
-            // 1. WCS 下发任务号（单字段写，大端不交换）
+            // 1. WCS 下发任务号与目标站台（单字段写，大端不交换）
             client.WriteSingleRegister(TaskNumRegister, taskNum);
+            client.WriteSingleRegister(ToStationRegister, 1005);
             WaitUntil(() => machine.State == StationState.Executing, $"第 {round} 轮：模拟器未进入动作态");
 
             // 2. 动作延时结束，模拟器置心跳
@@ -66,6 +71,9 @@ public sealed class ConveyorTaskCycleTests : IAsyncLifetime
             byte[] afterClear = client.ReadBytes(0, BlockBytes);
             Assert.Equal(0, WcsConveyorCodec.ReadU16(afterClear, HeartbeatByteOffset));
             Assert.Equal(0, machine.Snapshot().TaskNum);
+
+            // 6. 下游把这一轮的货清空（调试台「清空」按钮走的就是这条路径），腾出位置给下一轮
+            downstream.SetLoaded(false);
         }
     }
 
@@ -80,6 +88,7 @@ public sealed class ConveyorTaskCycleTests : IAsyncLifetime
         // 只给 1005 下发任务，1004 不应有任何反应。
         const int secondStationTaskRegister = TestConfigFactory.StationLengthBytes / 2 + TaskNumRegister;
         client.WriteSingleRegister((ushort)secondStationTaskRegister, 2001);
+        client.WriteSingleRegister((ushort)(secondStationTaskRegister + ToStationRegister), 1006);
 
         WaitUntil(() => second.State == StationState.Executing, "站台 1005 未进入动作态");
 

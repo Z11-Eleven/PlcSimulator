@@ -1,5 +1,5 @@
 {
-  // 潜江太蓝 PLC 模拟器配置 —— 堆垛机（NTI 协议 + Socket 传输）
+  // 堆垛机示例配置（NTI 协议 + Socket 传输）
   // 数据来源：数据库 qj_tl.wcs_equipmentinfo 中 equipmentnum = 'SC01' 的三行，
   // 分别是 rport 2000 / 4000 / 6000 —— 同一台堆垛机的三个端口，不是三台设备。
   //

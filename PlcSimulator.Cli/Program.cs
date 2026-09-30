@@ -35,7 +35,7 @@ catch (Exception ex)
 
 static void PrintUsage()
 {
-    Console.WriteLine("潜江太蓝 PLC 模拟器（Modbus TCP 服务端）");
+    Console.WriteLine("PLC 模拟器");
     Console.WriteLine();
     Console.WriteLine("用法：");
     Console.WriteLine("  serve [--config <路径>] [--log-frames] [--log-file <路径>]   启动模拟器");
@@ -117,7 +117,7 @@ static async Task<int> ServeAsync(string[] args)
     if (logFilePath is not null)
     {
         logWriter = new StreamWriter(File.Create(logFilePath), Encoding.UTF8) { AutoFlush = true };
-        logWriter.WriteLine($"# 潜江太蓝 PLC 模拟器日志  启动于 {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        logWriter.WriteLine($"# PLC 模拟器日志  启动于 {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         logWriter.WriteLine($"# 配置 {Path.GetFullPath(configPath)}");
         Console.WriteLine($"日志将写入 {Path.GetFullPath(logFilePath)}");
     }
@@ -204,7 +204,8 @@ static int Check(string[] args)
     if (loadResult.IsValid)
     {
         int srmCount = loadResult.Config.Devices.Count(
-            static d => string.Equals(d.Protocol, "Socket", StringComparison.OrdinalIgnoreCase));
+            static d => string.Equals(d.Protocol, "Socket", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(d.Protocol, "S7", StringComparison.OrdinalIgnoreCase));
 
         Console.WriteLine(
             $"配置有效：{loadResult.Config.Devices.Count} 台设备"
@@ -216,7 +217,8 @@ static int Check(string[] args)
 
         foreach (DeviceConfig device in loadResult.Config.Devices)
         {
-            if (string.Equals(device.Protocol, "Socket", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(device.Protocol, "Socket", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(device.Protocol, "S7", StringComparison.OrdinalIgnoreCase))
             {
                 PrintSrmDevice(device);
                 continue;
@@ -250,7 +252,15 @@ static int Check(string[] args)
 static void PrintSrmDevice(DeviceConfig device)
 {
     Console.WriteLine();
-    Console.WriteLine($"  设备 {device.Id}  {device.Ip}  对接协议 {device.ProtocolType}（堆垛机 · Socket 传输）");
+    Console.WriteLine($"  设备 {device.Id}  {device.Ip}  对接协议 {device.ProtocolType}（堆垛机 · {device.Protocol} 传输）");
+
+    if (device.Protocol.Equals("S7", StringComparison.OrdinalIgnoreCase) && device.S7 is S7OptionsConfig s7)
+    {
+        Console.WriteLine($"    S7 端口 {s7.Port}，最大 PDU {s7.MaxPduLength} 字节");
+        Console.WriteLine($"    指令 DB{s7.Command.DbNumber}.{s7.Command.ByteOffset}（{s7.CommandLength} 字节，负载偏移 {s7.CommandPayloadOffset}，可写）"
+            + $" / 状态 DB{s7.Status.DbNumber}.{s7.Status.ByteOffset}（{s7.StatusLength} 字节，只读）"
+            + $" / 报警 DB{s7.Alarm.DbNumber}.{s7.Alarm.ByteOffset}（{s7.AlarmLength} 字节，只读）");
+    }
 
     if (device.SocketPorts is SocketPortsConfig ports)
     {

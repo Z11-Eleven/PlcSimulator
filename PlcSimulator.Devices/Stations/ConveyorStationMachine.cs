@@ -193,21 +193,49 @@ public sealed class ConveyorStationMachine
 
     // ---- 手动注入（GUI 上的按钮） ----
 
-    /// <summary>注入或撤销「站台有货」。</summary>
+    /// <summary>
+    /// 注入或撤销「站台有货」。清空也可取消作业中或在途的搬运，并清除握手与在途缓存。
+    /// 已送达下游的货物不受影响。撤销（清空）会把随货带来的任务信息也一并清掉——
+    /// 站台既已被人工清干净，就不该再留着一个随后会自己触发一次的任务号。
+    /// </summary>
     public void SetLoaded(bool loaded)
     {
-        if (_state is StationState.Executing
+        if (loaded && (_state is StationState.Executing
             or StationState.WaitingDownstream
             or StationState.Transferring
-            or StationState.Done)
+            or StationState.Done))
         {
-            // 作业过程中不允许改变装载状态，避免与 WCS 的流程判断打架。
+            // 作业过程中不能注入新货；人工清空则取消当前搬运。
             return;
         }
 
         _autoForward = false;
         _cargoStays = false;
+        ClearCargo();
+        _activeTaskNum = 0;
+        _clearWaitMs = 0;
+
+        if (!loaded)
+        {
+            // 货被清走，随货的那份任务信息也一起清。留着它的话，下一个 tick 的接单
+            // 会把残留的任务号当成新任务再执行一遍——站台反而更忙，与「清空」的意图相反。
+            _station.ClearTaskFields();
+            WriteHandshake(0);
+            string handshakeField = _usesAckHandshake ? "ack" : "heartbeat";
+            if (_station.Device.ProtocolTemplate.TryGetWriteField(handshakeField, out _))
+            {
+                _station.ClearIncoming(handshakeField);
+            }
+        }
+
         Transition(loaded ? StationState.Loaded : StationState.Idle, loaded ? "手动注入：站台有货" : "手动注入：站台清空");
+    }
+
+    /// <summary>WCS 写零任务号后，由引擎线程清除本站任务和在途货物，保留手/自动设置。</summary>
+    public void ClearFromWcs()
+    {
+        SetLoaded(false);
+        RaiseChanged("WCS 清空站台：任务与在途货物已取消");
     }
 
     /// <summary>
@@ -268,7 +296,7 @@ public sealed class ConveyorStationMachine
         _station.AcceptCargo(taskNum, barcode, goodsType, fromStationNo, toStationNo);
 
         // 随货的这几项直接记在内存里。寄存器那份是按**读布局**写的，而回读走的是写布局——
-        // CATL 两套偏移不同（to 在 @36 / @4），回读会把目标读成 0，货物就被当成"离场"丢掉了。
+        // CATL 两套偏移不同（to 在 @36 / @4），回读会把目标读成 0，托盘会被误判成目标无效而卡住。
         _cargoTaskNum = taskNum;
         _cargoGoodsType = goodsType;
         _cargoBarcode = barcode;
@@ -359,7 +387,7 @@ public sealed class ConveyorStationMachine
 
     /// <summary>
     /// 本站动作结束。有明确目标站台时货物进入在途，等送达后完成；
-    /// 没有目标（或目标不在仿真范围内）时货物直接离场，本站立即完成。
+    /// 目标不在仿真范围内时托盘留在本站不动，等 WCS 把目标改对。
     /// </summary>
     private void FinishAction()
     {
@@ -386,10 +414,18 @@ public sealed class ConveyorStationMachine
             return;
         }
 
+        // 目标不在仿真范围内（虚拟站台、站台号写错、WCS 还没把 to 写全）：托盘留在本站不动，
+        // 任务信息一个字节都不清，等 WCS 把目标改对——改对后 TryAcceptTask 会发现 to 变了并重新执行。
+        // 与「下一站收不下」的区别：那个等的是下游空出来，这个等的是 WCS 改目标。
         if (!HasTarget())
         {
-            _station.ClearTaskFields();
-            CompleteWithoutDelivery($"目标站台 {_cargoTargetStationNo} 不在仿真范围，货物离场");
+            _cargoStays = true;
+
+            // 中转货物走到这里说明上游传下来的目标是坏的（正常不会发生）：
+            // 不能留着自动转发标记，否则回到 Loaded 后每 tick 都会重试一次、空转。
+            _autoForward = false;
+
+            Transition(StationState.Loaded, $"目标站台 {_cargoTargetStationNo} 不在仿真范围，托盘留在本站等待");
             return;
         }
 

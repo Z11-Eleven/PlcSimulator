@@ -25,6 +25,7 @@ public sealed class StationStateView : UserControl
     private static readonly Color ManualRowColor = Color.FromArgb(255, 243, 224);
 
     private readonly BufferedDataGridView _grid = new();
+    private readonly DeviceSearchBar _search = new();
     private SimulationEngine? _engine;
     private List<ConveyorStationMachine> _machines = [];
 
@@ -32,6 +33,8 @@ public sealed class StationStateView : UserControl
     {
         Dock = DockStyle.Fill;
         BuildGrid();
+        _search.QueryChanged += (_, _) => ApplyFilter();
+        Controls.Add(_search);
     }
 
     public void Bind(SimulatorHost host)
@@ -51,10 +54,39 @@ public sealed class StationStateView : UserControl
                 string.Empty,
                 string.Empty,
                 string.Empty,
-                "有货/清空",
+                machine.State == StationState.Idle ? "有货" : "清空",
                 ManualButtonText(machine.IsManual),
                 "复位");
         }
+        Update(host.Engine.Snapshots());
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        // 保留原始行索引，过滤后按钮和实时快照仍对应同一台状态机。
+        _grid.CurrentCell = null;
+        int visible = 0;
+        for (int i = 0; i < _machines.Count; i++)
+        {
+            var station = _machines[i].Station;
+            bool match = station.Device.Stations.Any(candidate =>
+                candidate.PrimaryStationNo == station.PrimaryStationNo && _search.Matches(candidate));
+            _grid.Rows[i].Visible = match;
+            if (match)
+            {
+                visible++;
+            }
+        }
+
+        DataGridViewRow? first = _grid.Rows.Cast<DataGridViewRow>().FirstOrDefault(static row => row.Visible);
+        if (first is not null)
+        {
+            _grid.FirstDisplayedScrollingRowIndex = first.Index;
+            _grid.CurrentCell = first.Cells[ColumnStation];
+        }
+
+        _search.ShowResult(visible, _machines.Count, "个站台");
     }
 
     public void Update(IReadOnlyList<StationSnapshot> snapshots)
@@ -71,6 +103,7 @@ public sealed class StationStateView : UserControl
             SetCell(row, ColumnDwell, $"{snapshot.TimeInState.TotalSeconds:F1} s");
             SetCell(row, ColumnTaskNum, snapshot.TaskNum == 0 ? string.Empty : snapshot.TaskNum.ToString());
             SetCell(row, ColumnBarcode, snapshot.Barcode);
+            SetCell(row, ColumnInject, snapshot.State == StationState.Idle ? "有货" : "清空");
             SetCell(row, ColumnManual, ManualButtonText(snapshot.Manual));
 
             row.Cells[ColumnState].Style.BackColor = StateColor(snapshot.State);
@@ -145,7 +178,7 @@ public sealed class StationStateView : UserControl
         switch (e.ColumnIndex)
         {
             case ColumnInject:
-                Post(() => machine.SetLoaded(machine.State != StationState.Loaded));
+                Post(() => machine.SetLoaded(machine.State == StationState.Idle));
                 break;
 
             case ColumnManual:

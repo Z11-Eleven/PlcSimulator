@@ -4,6 +4,7 @@
     <ProjectReference Include="..\PlcSimulator.Core\PlcSimulator.Core.csproj" />
     <ProjectReference Include="..\PlcSimulator.Protocol.Modbus\PlcSimulator.Protocol.Modbus.csproj" />
     <ProjectReference Include="..\PlcSimulator.Protocol.Socket\PlcSimulator.Protocol.Socket.csproj" />
+    <ProjectReference Include="..\PlcSimulator.Protocol.S7\PlcSimulator.Protocol.S7.csproj" />
     <ProjectReference Include="..\PlcSimulator.Devices\PlcSimulator.Devices.csproj" />
   </ItemGroup>
 

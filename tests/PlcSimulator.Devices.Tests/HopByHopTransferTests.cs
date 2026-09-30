@@ -211,6 +211,13 @@ public class HopByHopTransferTests
                     LocationX = 5, LocationY = 11, Width = 1, Height = 1,
                     ArrowDirection = "1", ZoneCode = "测试区", Simulation = LifterSimulation(),
                 },
+                // 1273 的下游死角：只为「先把 1273 占住」的场景有地方把它的货送出去
+                new StationConfig
+                {
+                    StationNo = "1274", ByteOffset = 150, LengthBytes = 30,
+                    LocationX = 5, LocationY = 10, Width = 1, Height = 1,
+                    ArrowDirection = "1", ZoneCode = "测试区", Simulation = LifterSimulation(),
+                },
             ],
         };
 
@@ -262,8 +269,10 @@ public class HopByHopTransferTests
         // 不能先送进提升机再等着。
         Line line = CreateLifterLine();
 
-        // 先占住下游 1273：给个无目标的任务，它完成后停在待清零（等 WCS 清零期间一直算忙）
+        // 先占住下游 1273：让 1273 把自己的货送到 1274，完成后停在待清零（等 WCS 清零期间一直算忙）
+        line.Machine("1273").SetLoaded(true);
         WcsWriteU16(line.Station("1273"), 0, 9001);
+        WcsWriteU16(line.Station("1273"), 6, 1274);
         AdvanceUntil(
             line.Engine,
             () => line.Machine("1273").State == StationState.Done,
@@ -308,8 +317,10 @@ public class HopByHopTransferTests
     {
         Line line = CreateLine();
 
-        // 先让 1003 忙起来：给个无目标的任务，它完成后停在待清零（等 WCS 清零期间算忙）
+        // 先让 1003 忙起来：把货送到 1004，完成后停在待清零（等 WCS 清零期间算忙）
+        line.Machine("1003").SetLoaded(true);
         WcsWriteU16(line.Station("1003"), 0, 9001);
+        WcsWriteU16(line.Station("1003"), 6, 1004);
         AdvanceUntil(
             line.Engine,
             () => line.Machine("1003").State == StationState.Done,

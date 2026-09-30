@@ -450,6 +450,7 @@ public class PathDiagnosticsTests
 
         machine.SetLoaded(true);
         StationFixtures.WcsWriteU16(machine.Station, 0, 1001);
+        StationFixtures.WcsWriteU16(machine.Station, 6, 1002);   // 目标写下游，货才送得出去
         engine.AdvanceOneTick();
 
         Assert.Equal(StationState.Executing, machine.State);

@@ -76,6 +76,7 @@ public sealed class ModbusRequestProcessor(IModbusDeviceResolver resolver)
             return Exception(request, ModbusExceptionCode.IllegalDataAddress);
         }
 
+        device.RegistersWritten?.Invoke(request.Address, request.Payload);
         ushort value = ModbusFrames.ReadUInt16BigEndian(request.Payload, 0);
         return ModbusFrames.BuildWriteResponse(
             request.TransactionId, request.UnitId, request.FunctionCode, request.Address, value);
@@ -98,6 +99,7 @@ public sealed class ModbusRequestProcessor(IModbusDeviceResolver resolver)
             return Exception(request, ModbusExceptionCode.IllegalDataAddress);
         }
 
+        device.RegistersWritten?.Invoke(request.Address, request.Payload);
         return ModbusFrames.BuildWriteResponse(
             request.TransactionId, request.UnitId, request.FunctionCode, request.Address, request.Quantity);
     }
@@ -124,6 +126,7 @@ public sealed class ModbusRequestProcessor(IModbusDeviceResolver resolver)
             return Exception(request, ModbusExceptionCode.IllegalDataAddress);
         }
 
+        device.RegistersWritten?.Invoke(request.WriteAddress, request.Payload);
         byte[] data = new byte[request.Quantity * 2];
         if (!device.Space.TryReadRegisters(request.Address, request.Quantity, data))
         {

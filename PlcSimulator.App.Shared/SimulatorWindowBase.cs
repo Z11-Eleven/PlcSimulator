@@ -54,17 +54,14 @@ public abstract class SimulatorWindowBase : Form
 
         BuildLayout();
 
-        Session.Reloaded += (_, _) => OnSessionReloaded();
-        Session.Logged += (_, message) => PostStatus(message);
+        Session.Reloaded += OnSessionReloaded;
+        Session.Logged += OnSessionLogged;
 
         _uiTimer.Interval = UiRefreshMs;
         _uiTimer.Tick += OnUiTick;
     }
 
     public SimulatorSession Session { get; }
-
-    /// <summary>窗口正在关闭（正等着服务停下来）。主窗口据此拒绝重复打开同一份配置。</summary>
-    public bool ClosingInProgress { get; private set; }
 
     /// <summary>标题栏里的窗口类型名。</summary>
     protected abstract string WindowKind { get; }
@@ -132,25 +129,26 @@ public abstract class SimulatorWindowBase : Form
         _uiTimer.Start();
     }
 
-    protected override async void OnFormClosing(FormClosingEventArgs e)
+    /// <summary>
+    /// 关窗口**不停服务**：窗口只是这份配置的一个视图，收起来之后引擎照跑，
+    /// 主窗口里双击那一行就能把它再开出来。停引擎是主窗口关闭时的统一动作，
+    /// 或者本窗口工具栏上的「停止」。
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
     {
         _uiTimer.Stop();
-
-        if (Session.IsRunning && !ClosingInProgress)
-        {
-            // 先停服务再关窗，否则会留下几百毫秒「窗口没了、端口还占着」的窗口期，
-            // 用户手快重开同一份配置就会撞端口。
-            e.Cancel = true;
-            ClosingInProgress = true;
-
-            await Session.StopAsync().ConfigureAwait(true);
-
-            // 这一次关闭已经被取消掉了，停完服务得再关一次——否则窗口留着，用户要按两次 X。
-            Close();
-            return;
-        }
-
         base.OnFormClosing(e);
+    }
+
+    /// <summary>
+    /// 解绑会话事件。窗口可以反复开关，不解绑的话每开一次就多留一份回调：
+    /// 旧窗口回收不掉，日志也要多发几路。
+    /// </summary>
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        Session.Reloaded -= OnSessionReloaded;
+        Session.Logged -= OnSessionLogged;
+        base.OnFormClosed(e);
     }
 
     private void BuildLayout()
@@ -280,7 +278,7 @@ public abstract class SimulatorWindowBase : Form
         }
     }
 
-    private void OnSessionReloaded()
+    private void OnSessionReloaded(object? sender, EventArgs e)
     {
         if (IsDisposed || !IsHandleCreated)
         {
@@ -306,6 +304,8 @@ public abstract class SimulatorWindowBase : Form
             }
         });
     }
+
+    private void OnSessionLogged(object? sender, string message) => PostStatus(message);
 
     /// <summary>把后台线程来的日志封送回 UI 线程。窗口还没句柄、或正在销毁时丢掉。</summary>
     private void PostStatus(string message)

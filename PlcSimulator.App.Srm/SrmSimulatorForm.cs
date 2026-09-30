@@ -18,7 +18,7 @@ public sealed class SrmSimulatorForm : SimulatorWindowBase
 
         if (session.Composition == DeviceComposition.Empty)
         {
-            ShowBanner("这份配置里没有启用的堆垛机：检查 devices[].enabled 与 protocol 是否为 \"Socket\"。");
+            ShowBanner("这份配置里没有启用的堆垛机：检查 devices[].enabled 与 protocol 是否为 \"Socket\" 或 \"S7\"。");
         }
     }
 

@@ -96,14 +96,16 @@ public class SharedAddressStationTests
         ConveyorStationMachine primary = engine.Find("10021")!;
         StationRuntime shared = device.Stations[2];
 
-        // WCS 给这段共用地址写任务号（两个图标对应同一段寄存器）。
-        shared.Device.Space.TryWriteBytes(shared.ByteOffset, [0x04, 0xD2]);
+        // WCS 给这段共用地址写任务号与目标（两个图标对应同一段寄存器）。
+        shared.Device.Space.TryWriteBytes(shared.ByteOffset, [0x04, 0xD2]);        // tasknum = 1234
+        shared.Device.Space.TryWriteBytes(shared.ByteOffset + 6, [0x03, 0xE9]);    // to = 1001
         engine.AdvanceOneTick();
 
         Assert.Equal(StationState.Executing, primary.State);
 
         // 只应有一个状态机在跑，心跳也只会被这一台置位。
-        for (int i = 0; i < 70; i++)
+        // 默认动作 3000 ms + 在途 1000 ms，留足余量。
+        for (int i = 0; i < 100; i++)
         {
             engine.AdvanceOneTick();
         }

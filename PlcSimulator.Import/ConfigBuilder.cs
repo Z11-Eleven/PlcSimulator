@@ -2,8 +2,25 @@ using PlcSimulator.Core.Configuration;
 
 namespace PlcSimulator.Import;
 
+public enum ImportDeviceKind
+{
+    Conveyor,
+    Srm,
+}
+
 public sealed class ImportOptions
 {
+    public ImportDeviceKind DeviceKind { get; set; }
+
+    public string SrmTransport { get; set; } = "Socket";
+
+    public bool UseLoopbackIps { get; set; }
+
+    public string LoopbackStartIp { get; set; } = "127.0.0.1";
+
+    public int TravelDelayMs { get; set; } = 1000;
+
+    public S7OptionsConfig S7 { get; set; } = new();
     public string InputPath { get; set; } = string.Empty;
 
     public string OutputPath { get; set; } = string.Empty;
@@ -54,6 +71,10 @@ public static class ConfigBuilder
 
     public static SimulatorConfig Build(ImportTable table, ImportOptions options, out List<string> notes)
     {
+        if (options.DeviceKind == ImportDeviceKind.Srm)
+        {
+            return SrmConfigBuilder.Build(table, options, out notes);
+        }
         notes = [];
 
         int iStationNo = table.IndexOf("stationno");

@@ -7,22 +7,25 @@ using PlcSimulator.Core.Registers;
 namespace PlcSimulator.Devices.Srm;
 
 /// <summary>
-/// 一台堆垛机的数据区与 Socket 会话。
+/// 一台堆垛机的数据区与 Socket / S7 会话。
 /// <para>
 /// 三个区段（指令 / 状态 / 报警）在数据区里的基址纯属内部约定：
-/// Socket 协议没有「地址」概念，改基址不影响 WCS 看到的任何一个字节。
+/// S7 的外部 DB 地址通过配置映射；内部基址不影响通信中的字段偏移。
 /// </para>
 /// <para>
 /// 数据区自带锁，因此 Socket 线程（写指令区、读状态区）与引擎线程（读指令区、写状态区）
 /// 之间不需要额外同步——每次交接都是一次完整的区段读写，不会读到写了一半的内容。
 /// </para>
 /// </summary>
-public sealed class SrmDeviceRuntime : ISocketDeviceSession
+public sealed class SrmDeviceRuntime : ISocketDeviceSession, IS7DeviceSession
 {
     /// <summary>待处理指令队列的容量。双货叉一次下发两条也够用，超出说明对端在灌帧。</summary>
     private const int MaxPendingCommands = 64;
 
     private readonly ConcurrentQueue<SrmCommand> _commands = new();
+    private readonly object _s7CommandSync = new();
+    private readonly byte[] _s7Command = new byte[SrmLayout.CommandFrameLength];
+    private readonly bool[] _s7Received = new bool[SrmLayout.CommandAreaLength];
 
     private SrmDeviceRuntime(DeviceConfig config, SocketPortsConfig ports, SrmOptionsConfig options)
     {
@@ -53,9 +56,11 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
 
     public int CommandFrameLength => SrmLayout.CommandFrameLength;
 
-    public int StatusFrameLength => Ports.StatusFrameLength;
+    public int StatusFrameLength => Config.Protocol.Equals("S7", StringComparison.OrdinalIgnoreCase)
+        ? Config.S7!.StatusLength : Ports.StatusFrameLength;
 
-    public int AlarmFrameLength => Ports.AlarmFrameLength;
+    public int AlarmFrameLength => Config.Protocol.Equals("S7", StringComparison.OrdinalIgnoreCase)
+        ? Config.S7!.AlarmLength : Ports.AlarmFrameLength;
 
     /// <summary>因队列满而被丢弃的指令条数。非零说明对端在灌帧，值得排查。</summary>
     public long DroppedCommands { get; private set; }
@@ -65,7 +70,12 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        SocketPortsConfig ports = config.SocketPorts
+        bool s7 = string.Equals(config.Protocol, "S7", StringComparison.OrdinalIgnoreCase);
+        if (s7 && config.S7 is null)
+        {
+            throw new InvalidDataException($"设备 {config.Id} 是 S7 设备，但缺少 s7 配置。");
+        }
+        SocketPortsConfig ports = s7 ? new SocketPortsConfig() : config.SocketPorts
             ?? throw new InvalidDataException($"设备 {config.Id} 是 Socket 设备，但缺少 socketPorts 配置。");
         SrmOptionsConfig options = config.Srm
             ?? throw new InvalidDataException($"设备 {config.Id} 是堆垛机，但缺少 srm 配置。");
@@ -79,7 +89,15 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
 
     public void OnCommandFrame(ReadOnlySpan<byte> frame)
     {
-        if (!SrmFrames.TryParseCommand(frame, out SrmCommand command))
+        if (frame.Length >= SrmLayout.CommandFrameLength)
+        {
+            OnCommandPayload(frame.Slice(SrmLayout.CommandPayloadOffset, SrmLayout.CommandAreaLength));
+        }
+    }
+
+    private void OnCommandPayload(ReadOnlySpan<byte> payload)
+    {
+        if (!SrmFrames.TryParseCommandPayload(payload, out SrmCommand command))
         {
             return;
         }
@@ -88,7 +106,7 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
         // 排查「指令收到但没动作」时这是第一手证据。
         Space.TryWriteBytes(
             SrmLayout.CommandAreaBase,
-            frame[SrmLayout.CommandPayloadOffset..SrmLayout.CommandFrameLength]);
+            payload[..SrmLayout.CommandAreaLength]);
 
         SubmitCommand(command);
     }
@@ -106,6 +124,83 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
         Space.TryReadBytes(SrmLayout.AlarmAreaBase, destination[..length]);
         return length;
     }
+
+    public S7AccessResult ReadDb(ushort dbNumber, int byteOffset, Span<byte> destination)
+    {
+        S7OptionsConfig options = Config.S7!;
+        if (options.Command.DbNumber == dbNumber && Covers(options.Command, options.CommandLength, byteOffset, destination.Length))
+        {
+            lock (_s7CommandSync)
+            {
+                _s7Command.AsSpan(byteOffset - options.Command.ByteOffset, destination.Length).CopyTo(destination);
+            }
+            return S7AccessResult.Success;
+        }
+        foreach (var region in DbRegions(options))
+        {
+            if (region.Address.DbNumber == dbNumber && Covers(region.Address, region.Length, byteOffset, destination.Length))
+            {
+                Space.TryReadBytes(region.Base + byteOffset - region.Address.ByteOffset, destination);
+                return S7AccessResult.Success;
+            }
+        }
+
+        return DbRegions(options).Any(region => region.Address.DbNumber == dbNumber)
+            ? S7AccessResult.InvalidAddress : S7AccessResult.ObjectNotFound;
+    }
+
+    public S7AccessResult WriteDb(ushort dbNumber, int byteOffset, ReadOnlySpan<byte> source)
+    {
+        S7OptionsConfig options = Config.S7!;
+        if (options.Command.DbNumber == dbNumber && Covers(options.Command, options.CommandLength, byteOffset, source.Length))
+        {
+            // 分段写入必须收齐全部 23 字节才执行，避免将新指令和上一条残留字段拼在一起。
+            lock (_s7CommandSync)
+            {
+                int offset = byteOffset - options.Command.ByteOffset;
+                source.CopyTo(_s7Command.AsSpan(offset));
+                // 只按业务负载收齐判定；前导协调字节、尾部对齐字节不参与字段解析。
+                int start = Math.Max(offset, options.CommandPayloadOffset);
+                int end = Math.Min(offset + source.Length, options.CommandPayloadOffset + SrmLayout.CommandAreaLength);
+                if (end > start)
+                {
+                    Array.Fill(_s7Received, true, start - options.CommandPayloadOffset, end - start);
+                    Space.TryWriteBytes(SrmLayout.CommandAreaBase + start - options.CommandPayloadOffset,
+                        _s7Command.AsSpan(start, end - start));
+                }
+                if (_s7Received.All(static received => received))
+                {
+                    OnCommandPayload(_s7Command.AsSpan(options.CommandPayloadOffset, SrmLayout.CommandAreaLength));
+                    Array.Clear(_s7Received);
+                }
+            }
+
+            return S7AccessResult.Success;
+        }
+
+        foreach (var region in DbRegions(options))
+        {
+            if (region.Address.DbNumber == dbNumber && Covers(region.Address, region.Length, byteOffset, source.Length))
+            {
+                return S7AccessResult.AccessDenied;
+            }
+        }
+
+        return DbRegions(options).Any(region => region.Address.DbNumber == dbNumber)
+            ? S7AccessResult.InvalidAddress : S7AccessResult.ObjectNotFound;
+    }
+
+    private static bool Covers(S7DbRegionConfig region, int length, int offset, int count)
+        => count > 0 && offset >= region.ByteOffset && count <= length
+            && offset - region.ByteOffset <= length - count;
+
+    private static (S7DbRegionConfig Address, int Base, int Length)[] DbRegions(S7OptionsConfig options)
+        =>
+        [
+            (options.Command, SrmLayout.CommandAreaBase, options.CommandLength),
+            (options.Status, SrmLayout.StatusAreaBase, options.StatusLength),
+            (options.Alarm, SrmLayout.AlarmAreaBase, options.AlarmLength),
+        ];
 
     // ---- 指令交接：Socket 线程 → 引擎线程 ----
 
@@ -131,6 +226,7 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
     public void WriteStatus(in SrmStatusValues values)
     {
         Span<byte> buffer = stackalloc byte[SrmLayout.StatusAreaLength];
+        buffer.Clear();
         SrmFrames.WriteStatus(buffer, values);
         Space.TryWriteBytes(SrmLayout.StatusAreaBase, buffer);
     }
@@ -145,6 +241,11 @@ public sealed class SrmDeviceRuntime : ISocketDeviceSession
 
     public void ApplyInitialValues()
     {
+        lock (_s7CommandSync)
+        {
+            Array.Clear(_s7Command);
+            Array.Clear(_s7Received);
+        }
         SrmPoint initial = SrmPoint.FromConfig(Options.InitialPoint);
 
         byte mode = Options.Fault

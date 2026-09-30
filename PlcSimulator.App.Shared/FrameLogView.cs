@@ -14,10 +14,12 @@ public sealed class FrameLogView : UserControl
 
     private readonly ListView _list = new();
     private readonly List<FrameLogEntry> _entries = [];
+    private readonly List<FrameLogEntry> _visibleEntries = [];
     private readonly ToolStrip _toolStrip = new();
     private readonly ToolStripButton _clearButton = new("清空");
     private readonly ToolStripButton _exportButton = new("导出 CSV…");
     private readonly ToolStripButton _autoScrollButton = new("自动滚动") { CheckOnClick = true, Checked = true };
+    private readonly ToolStripButton _s7WritesButton = new("仅看 S7 写入") { CheckOnClick = true };
 
     public FrameLogView()
     {
@@ -40,18 +42,29 @@ public sealed class FrameLogView : UserControl
             _entries.RemoveRange(0, _entries.Count - MaxRendered);
         }
 
-        _list.VirtualListSize = _entries.Count;
+        RefreshVisibleEntries();
 
-        if (_autoScrollButton.Checked && _entries.Count > 0)
+        if (_autoScrollButton.Checked && _visibleEntries.Count > 0)
         {
-            _list.EnsureVisible(_entries.Count - 1);
+            _list.EnsureVisible(_visibleEntries.Count - 1);
         }
     }
 
     public void Clear()
     {
         _entries.Clear();
+        _visibleEntries.Clear();
         _list.VirtualListSize = 0;
+    }
+
+    private void RefreshVisibleEntries()
+    {
+        _visibleEntries.Clear();
+        _visibleEntries.AddRange(_s7WritesButton.Checked
+            ? _entries.Where(e => e.Summary.StartsWith("[S7] 写入 ", StringComparison.Ordinal))
+            : _entries);
+        _list.VirtualListSize = _visibleEntries.Count;
+        _list.Invalidate();
     }
 
     private void BuildLayout()
@@ -61,6 +74,8 @@ public sealed class FrameLogView : UserControl
         _toolStrip.Items.Add(_exportButton);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_autoScrollButton);
+        _toolStrip.Items.Add(_s7WritesButton);
+        _s7WritesButton.CheckedChanged += (_, _) => RefreshVisibleEntries();
 
         _clearButton.Click += (_, _) => Clear();
         _exportButton.Click += (_, _) => ExportWithDialog();
@@ -88,13 +103,13 @@ public sealed class FrameLogView : UserControl
 
     private void OnRetrieveVirtualItem(object? sender, RetrieveVirtualItemEventArgs e)
     {
-        if (e.ItemIndex < 0 || e.ItemIndex >= _entries.Count)
+        if (e.ItemIndex < 0 || e.ItemIndex >= _visibleEntries.Count)
         {
             e.Item = new ListViewItem(string.Empty);
             return;
         }
 
-        FrameLogEntry entry = _entries[e.ItemIndex];
+        FrameLogEntry entry = _visibleEntries[e.ItemIndex];
 
         e.Item = new ListViewItem(
         [
@@ -124,7 +139,7 @@ public sealed class FrameLogView : UserControl
         try
         {
             ExportTo(dialog.FileName);
-            MessageBox.Show(this, $"已导出 {_entries.Count} 条到：\n{dialog.FileName}", "导出完成");
+            MessageBox.Show(this, $"已导出 {_visibleEntries.Count} 条到：\n{dialog.FileName}", "导出完成");
         }
         catch (Exception ex)
         {
@@ -138,7 +153,7 @@ public sealed class FrameLogView : UserControl
         using var writer = new StreamWriter(path, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         writer.WriteLine("时间,方向,连接,设备,摘要,原始字节,耗时ms");
 
-        foreach (FrameLogEntry entry in _entries)
+        foreach (FrameLogEntry entry in _visibleEntries)
         {
             writer.Write(entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"));
             writer.Write(',');

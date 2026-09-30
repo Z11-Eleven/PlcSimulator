@@ -14,7 +14,7 @@ public sealed class DeviceConfig
 
     public byte SlaveId { get; set; } = 1;
 
-    /// <summary>Modbus 或 S7（后者为预留）。</summary>
+    /// <summary>通信协议：Modbus、Socket，或堆垛机的 S7。</summary>
     public string Protocol { get; set; } = "Modbus";
 
     /// <summary>数据库 protocolType 原值，仅用于导入核对，例如 "NTI_Modbus"。</summary>
@@ -36,6 +36,9 @@ public sealed class DeviceConfig
 
     /// <summary>Socket 传输的三端口与线长；<c>Protocol = "Socket"</c> 时必填。</summary>
     public SocketPortsConfig? SocketPorts { get; set; }
+
+    /// <summary>S7 的监听与 DB 映射；protocol = "S7" 时必填。</summary>
+    public S7OptionsConfig? S7 { get; set; }
 
     /// <summary>堆垛机专项参数；<c>Protocol = "Socket"</c> 时必填。</summary>
     public SrmOptionsConfig? Srm { get; set; }

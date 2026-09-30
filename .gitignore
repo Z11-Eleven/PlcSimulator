@@ -37,3 +37,7 @@ packages/
 
 # 模拟器运行时产物：报文与状态机日志（--log-file 的落盘位置）
 PlcSimulator/logs/
+
+# 用户硬约束：仅供本地维护，不提交或推送
+/docs/
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]

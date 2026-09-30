@@ -20,7 +20,18 @@ public static class SrmFrames
             return false;
         }
 
-        ReadOnlySpan<byte> payload = frame[SrmLayout.CommandPayloadOffset..];
+        return TryParseCommandPayload(frame[SrmLayout.CommandPayloadOffset..], out command);
+    }
+
+    /// <summary>解析原有的 23 字节业务负载，Socket 与 S7 共用同一套字段。</summary>
+    public static bool TryParseCommandPayload(ReadOnlySpan<byte> payload, out SrmCommand command)
+    {
+        command = default;
+        if (payload.Length < SrmLayout.CommandAreaLength)
+        {
+            return false;
+        }
+
         command = new SrmCommand(
             Fork1TaskNum: ReadU16(payload, 2),
             Fork2TaskNum: ReadU16(payload, 0),

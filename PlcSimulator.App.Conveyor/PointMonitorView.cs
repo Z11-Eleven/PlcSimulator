@@ -39,8 +39,10 @@ public sealed class PointMonitorView : UserControl
     };
 
     private readonly BufferedDataGridView _grid = new();
+    private readonly DeviceSearchBar _search = new();
+    private readonly List<PointRow> _allRows = [];
     private readonly List<PointRow> _rows = [];
-    private readonly Dictionary<int, DateTime> _lastChanged = [];
+    private readonly Dictionary<PointRow, DateTime> _lastChanged = [];
     private readonly List<DeviceRange> _deviceRanges = [];
     private SimulatorHost? _host;
 
@@ -48,32 +50,51 @@ public sealed class PointMonitorView : UserControl
     {
         Dock = DockStyle.Fill;
         BuildGrid();
+        _search.QueryChanged += (_, _) => ApplyFilter();
+        Controls.Add(_search);
     }
 
     public void Bind(SimulatorHost host)
     {
         _host = host;
-        _rows.Clear();
+        _allRows.Clear();
         _lastChanged.Clear();
         _deviceRanges.Clear();
 
         foreach (DeviceRuntime device in host.Devices)
         {
-            int rowStart = _rows.Count;
-
             foreach (StationRuntime station in device.Stations)
             {
                 foreach (FieldDescriptor field in station.EnumerateFields())
                 {
-                    _rows.Add(new PointRow(device, station, field, IsReadField(device, field)));
+                    _allRows.Add(new PointRow(device, station, field, IsReadField(device, field)));
                 }
             }
 
-            _deviceRanges.Add(new DeviceRange(device, rowStart, _rows.Count - rowStart));
+        }
+
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        // 结束当前编辑后再换行映射，确保写入仍落到编辑时的站台。
+        _grid.EndEdit();
+        _grid.CurrentCell = null;
+        _grid.RowCount = 0;
+        _rows.Clear();
+        _deviceRanges.Clear();
+
+        foreach (IGrouping<DeviceRuntime, PointRow> group in _allRows.GroupBy(static row => row.Device))
+        {
+            int start = _rows.Count;
+            _rows.AddRange(group.Where(row => _search.Matches(row.Station)));
+            _deviceRanges.Add(new DeviceRange(group.Key, start, _rows.Count - start));
         }
 
         _grid.RowCount = _rows.Count;
         _grid.Invalidate();
+        _search.ShowResult(_rows.Count, _allRows.Count, "个点位");
     }
 
     /// <summary>按数据区的脏区刷新受影响的行，其余行不动。</summary>
@@ -103,7 +124,7 @@ public sealed class PointMonitorView : UserControl
 
                 if (Overlaps(dirty, fieldStart, fieldEnd))
                 {
-                    _lastChanged[index] = now;
+                    _lastChanged[row] = now;
                     _grid.InvalidateRow(index);
                 }
             }
@@ -193,7 +214,7 @@ public sealed class PointMonitorView : UserControl
             ColumnKind => row.Field.Kind.ToString(),
             ColumnValue => FormatValue(row),
             ColumnIncoming => FormatIncomingValue(row),
-            ColumnChanged => _lastChanged.TryGetValue(e.RowIndex, out DateTime changed)
+            ColumnChanged => _lastChanged.TryGetValue(row, out DateTime changed)
                 ? changed.ToString("HH:mm:ss.fff")
                 : string.Empty,
             _ => null,
@@ -213,7 +234,7 @@ public sealed class PointMonitorView : UserControl
         try
         {
             ApplyValue(row, text);
-            _lastChanged[e.RowIndex] = DateTime.Now;
+            _lastChanged[row] = DateTime.Now;
         }
         catch (Exception ex)
         {
@@ -342,7 +363,7 @@ public sealed class PointMonitorView : UserControl
             }
         }
 
-        if (!_lastChanged.TryGetValue(e.RowIndex, out DateTime changed)
+        if (!_lastChanged.TryGetValue(_rows[e.RowIndex], out DateTime changed)
             || (DateTime.Now - changed).TotalMilliseconds > 800)
         {
             return;
